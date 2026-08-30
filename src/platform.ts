@@ -1,3 +1,6 @@
+import { writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
+import { join } from "node:path";
 import type {
   API,
   Characteristic,
@@ -32,6 +35,7 @@ import {
   parseConfig,
   type UnifiProtectConfig,
 } from "#config";
+import { probeCodecs, type CodecSupport } from "#media/codecs";
 import { PLATFORM_NAME, PLUGIN_NAME } from "#settings";
 import { describe } from "#util/describe";
 
@@ -54,6 +58,8 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
   readonly #byDeviceId = new Map<string, string>();
 
   #connection: ProtectConnection | undefined;
+  #codecs: CodecSupport | undefined;
+  #consoleCaFile: string | undefined;
   #shuttingDown = false;
   #connected = false;
   /** The discovery run in flight, and whether another was asked for meanwhile. */
@@ -107,6 +113,32 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
     return this.#connected;
   }
 
+  /**
+   * What this host's ffmpeg can do. Probed once, before any camera is built, so
+   * it is always present by the time a stream is asked for.
+   */
+  get codecs(): CodecSupport {
+    if (!this.#codecs) throw new Error("ffmpeg has not been probed yet");
+    return this.#codecs;
+  }
+
+  /**
+   * Whether video is available at all. Separate from `codecs` so a camera can
+   * ask without having to catch: an ffmpeg that would not run is a normal
+   * outcome, not an exceptional one.
+   */
+  get hasCodecs(): boolean {
+    return this.#codecs !== undefined;
+  }
+
+  /**
+   * A PEM for ffmpeg to verify the console's RTSPS certificate against, or
+   * undefined when verification is not possible. See `tlsInputArgs`.
+   */
+  get consoleCaFile(): string | undefined {
+    return this.#consoleCaFile;
+  }
+
   async #start(): Promise<void> {
     const config = this.#config;
     if (!config) return;
@@ -143,6 +175,22 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
       return;
     }
 
+    if (config.enableStreaming) {
+      try {
+        this.#codecs = await probeCodecs(config.videoProcessor, this.#logger(config.debug));
+      } catch (error) {
+        // Video is the one part that depends on something outside the plugin.
+        // Losing it should cost the cameras their picture, not the whole
+        // platform its sensors.
+        this.log.error(
+          `Could not run ${config.videoProcessor}: ${describe(error)}. ` +
+            `Live video is disabled; motion and doorbell events still work. ` +
+            `Install ffmpeg, or point \`videoProcessor\` at it.`,
+        );
+      }
+      this.#consoleCaFile = await this.#writeConsoleCertificate();
+    }
+
     const nvr = this.#connection.store.nvr;
     this.log.info(
       `Connected to ${nvr?.name ?? config.host} running Protect ${nvr?.version ?? "(unknown)"}.`,
@@ -155,6 +203,36 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
     }
 
     await this.#discover();
+  }
+
+  /**
+   * Write the pinned console certificate where ffmpeg can read it.
+   *
+   * Only worth doing when the console is addressed by host name. ffmpeg can be
+   * given a trust anchor but not a fingerprint, so it still runs the host name
+   * check — and the console's certificate carries no IP SAN, so by IP that
+   * check can never pass and verification has to be off regardless.
+   */
+  async #writeConsoleCertificate(): Promise<string | undefined> {
+    const pem = this.#connection?.tlsOptions.ca?.[0];
+    if (!pem || isIP(this.options.host)) {
+      if (pem) {
+        this.log.debug(
+          "The console is addressed by IP, so ffmpeg cannot verify its certificate for RTSPS — " +
+            "the certificate carries no IP SAN. No credentials cross that connection.",
+        );
+      }
+      return undefined;
+    }
+
+    const path = join(this.api.user.storagePath(), "unifi-protect-console.pem");
+    try {
+      await writeFile(path, pem, { mode: 0o600 });
+      return path;
+    } catch (error) {
+      this.log.debug(`Could not write the console certificate for ffmpeg: ${describe(error)}`);
+      return undefined;
+    }
   }
 
   async #stop(): Promise<void> {

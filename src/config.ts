@@ -31,6 +31,7 @@ const zConfig = z.looseObject({
 
   host: z.string().optional(),
   port: z.number().optional(),
+  rtspPort: z.number().optional(),
   username: z.string().optional(),
   password: z.string().optional(),
 
@@ -47,6 +48,10 @@ const zConfig = z.looseObject({
   motionDuration: z.number().optional(),
   cameras: z.array(zPerCamera).optional(),
 
+  enableStreaming: z.boolean().optional(),
+  videoProcessor: z.string().optional(),
+  verboseFfmpeg: z.boolean().optional(),
+
   debug: z.boolean().optional(),
 });
 
@@ -59,6 +64,7 @@ export type CameraOverride = {
 export type UnifiProtectConfig = {
   host: string;
   port: number;
+  rtspPort: number;
   username: string;
   password: string;
   fingerprint: string | undefined;
@@ -69,6 +75,9 @@ export type UnifiProtectConfig = {
   exposeNvr: boolean;
   motionDurationMs: number;
   cameras: CameraOverride[];
+  enableStreaming: boolean;
+  videoProcessor: string;
+  verboseFfmpeg: boolean;
   debug: boolean;
 };
 
@@ -103,6 +112,8 @@ export const parseConfig = (config: PlatformConfig): UnifiProtectConfig => {
     // their browser, and `https://10.0.0.1/` is not a host name.
     host: raw.host.replace(/^https?:\/\//, "").replace(/\/.*$/, ""),
     port: raw.port ?? 443,
+    // Protect serves RTSPS on its own port, separate from the web interface.
+    rtspPort: raw.rtspPort ?? 7441,
     username: raw.username,
     password: raw.password,
     fingerprint: raw.fingerprint,
@@ -123,6 +134,14 @@ export const parseConfig = (config: PlatformConfig): UnifiProtectConfig => {
     // notifications.
     motionDurationMs:
       clamp(raw.motionDuration ?? 10, MIN_MOTION_DURATION_S, MAX_MOTION_DURATION_S) * 1000,
+
+    // Live video is on by default, but it is the one part that can fail for
+    // reasons outside the plugin — a missing ffmpeg, a console that refuses to
+    // enable RTSP — so it can be switched off while keeping motion and
+    // doorbell events working.
+    enableStreaming: raw.enableStreaming ?? true,
+    videoProcessor: raw.videoProcessor ?? "ffmpeg",
+    verboseFfmpeg: raw.verboseFfmpeg ?? false,
 
     cameras: (raw.cameras ?? []).map((entry) => ({
       mac: normalizeMac(entry.mac),

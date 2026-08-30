@@ -1,21 +1,32 @@
-import type { PlatformAccessory, Service } from "homebridge";
+import type { CameraController, PlatformAccessory, Service } from "homebridge";
 import { isDoorbell, smartDetectGate, type Camera } from "@mgcrea/unifi-protect";
 
 import { BaseAccessory } from "#accessories/base-accessory";
+import {
+  AudioBitrate,
+  AudioCodec,
+  AudioSamplerate,
+  H264Level,
+  H264Profile,
+  SrtpCryptoSuite,
+} from "#media/hap";
+import { advertisedResolutions } from "#media/rtsp";
+import { StreamingDelegate } from "#media/streaming-delegate";
 import type { UnifiProtectPlatform } from "#platform";
 
 /**
- * A Protect camera in HomeKit.
+ * A Protect camera in HomeKit: motion, the doorbell button, and live video.
  *
- * At this stage it carries the two services that drive automations — motion and
- * the doorbell button — and no video. Streaming and HomeKit Secure Video attach
- * a CameraController to this same accessory later; keeping the sensor half
- * complete and correct first means the automation value lands without waiting
- * on the media stack.
+ * The motion sensor is handed to the CameraController rather than left standing
+ * on its own, because HomeKit Secure Video uses that service as its recording
+ * trigger — wiring it in now means the recording delegate has somewhere to
+ * attach without the accessory being rebuilt and its automations detached.
  */
 export class CameraAccessory extends BaseAccessory<Camera> {
   readonly #motion: Service;
   readonly #doorbell: Service | undefined;
+  readonly #streaming: StreamingDelegate | undefined;
+  readonly #controller: CameraController | undefined;
 
   #motionTimer: NodeJS.Timeout | undefined;
   #motionActive = false;
@@ -61,7 +72,63 @@ export class CameraAccessory extends BaseAccessory<Camera> {
     );
 
     this.#warnAboutBlockedSmartDetection();
+
+    if (platform.options.enableStreaming && platform.hasCodecs) {
+      this.#streaming = new StreamingDelegate(platform, () => this.device);
+      this.#controller = this.#buildController(this.#streaming);
+      accessory.configureController(this.#controller);
+    }
+
     this.update(device);
+  }
+
+  /**
+   * Advertise what this camera can actually deliver.
+   *
+   * The resolution list leads with the camera's own channel sizes, so the size
+   * HomeKit picks is usually one the stream can be copied for rather than
+   * transcoded. Audio is advertised only when the host's ffmpeg can produce
+   * AAC-ELD: offering a codec that cannot be delivered gets a viewer a silent
+   * stream and no explanation, where offering none at all gets them a working
+   * picture.
+   */
+  #buildController(delegate: StreamingDelegate): CameraController {
+    const { codecs } = this.platform;
+
+    return new this.platform.api.hap.CameraController({
+      // Two is what the HAP specification asks of a camera that is not doing
+      // Secure Video; it is what lets a second device watch at the same time.
+      cameraStreamCount: 2,
+      delegate,
+      streamingOptions: {
+        supportedCryptoSuites: [SrtpCryptoSuite.AES_CM_128_HMAC_SHA1_80],
+        video: {
+          resolutions: advertisedResolutions(this.device),
+          codec: {
+            profiles: [H264Profile.BASELINE, H264Profile.MAIN, H264Profile.HIGH],
+            levels: [H264Level.LEVEL3_1, H264Level.LEVEL3_2, H264Level.LEVEL4_0],
+          },
+        },
+        ...(codecs.audioEncoder
+          ? {
+              audio: {
+                codecs: [
+                  {
+                    type: AudioCodec.AAC_ELD,
+                    audioChannels: 1,
+                    bitrate: AudioBitrate.VARIABLE,
+                    samplerate: [AudioSamplerate.KHZ_16, AudioSamplerate.KHZ_24],
+                  },
+                ],
+                twoWayAudio: false,
+              },
+            }
+          : {}),
+      },
+      // The controller takes over the motion service the accessory already
+      // built, rather than adding a second one beside it.
+      sensors: { motion: this.#motion },
+    });
   }
 
   protected get isReadable(): boolean {
@@ -118,6 +185,7 @@ export class CameraAccessory extends BaseAccessory<Camera> {
 
   override dispose(): void {
     super.dispose();
+    this.#streaming?.dispose();
     this.#motionTimer = undefined;
   }
 

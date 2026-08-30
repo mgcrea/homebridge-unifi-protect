@@ -8,7 +8,13 @@
 import type { API, PlatformConfig } from "homebridge";
 import { describe, expect, it, vi } from "vitest";
 
-import { createFakeLog, FakeAccessory, nameProxy, type FakeLog } from "./fake-hap.js";
+import {
+  createFakeLog,
+  FakeAccessory,
+  FakeCameraController,
+  nameProxy,
+  type FakeLog,
+} from "./fake-hap.js";
 
 const protect = vi.hoisted(() => {
   const store = {
@@ -28,6 +34,9 @@ const protect = vi.hoisted(() => {
           store,
           client: { patch: vi.fn<(path: string, body: unknown) => Promise<unknown>>() },
           fingerprint: "AB".repeat(32),
+          // Faithful to ProtectConnection: a real one always carries the TLS
+          // options the console was reached with.
+          tlsOptions: { rejectUnauthorized: true, ca: ["-----BEGIN CERTIFICATE-----"] },
           disconnect: vi.fn<() => Promise<void>>(async () => undefined),
         };
       },
@@ -44,6 +53,13 @@ const protect = vi.hoisted(() => {
 });
 
 const protectMockReset = (): void => undefined;
+
+// ffmpeg is not what this spec is about, and probing it for real would spawn a
+// binary that may not exist and would not settle inside `drain()`.
+vi.mock("#media/codecs", async () => {
+  const { FAKE_CODECS } = await import("./fake-hap.js");
+  return { probeCodecs: async () => FAKE_CODECS };
+});
 
 vi.mock("@mgcrea/unifi-protect", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -92,6 +108,7 @@ const createFakeApi = (): FakeApi => {
       Service: nameProxy,
       Characteristic: nameProxy,
       HapStatusError: class extends Error {},
+      CameraController: FakeCameraController,
       // A stable, collision-free identity per seed is all the platform needs.
       uuid: {
         generate: (seed: string) => {

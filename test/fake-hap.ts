@@ -73,12 +73,22 @@ export class FakeService {
   }
 }
 
+/** Records that a controller was configured, which is all the specs need to see. */
+export class FakeCameraController {
+  constructor(readonly options: Record<string, unknown>) {}
+}
+
 export class FakeAccessory {
   readonly services: FakeService[] = [];
   readonly context: Record<string, unknown> = {};
+  readonly controllers: FakeCameraController[] = [];
   displayName = "";
 
   constructor(public UUID = "uuid-1") {}
+
+  configureController(controller: FakeCameraController): void {
+    this.controllers.push(controller);
+  }
 
   getService(type: string): FakeService | undefined {
     return this.services.find((service) => service.type === type && !service.subtype);
@@ -122,26 +132,48 @@ export const createFakeLog = (): FakeLog => ({
   debug: vi.fn<(message: string) => void>(),
 });
 
+/** A deterministic stand-in for a probed ffmpeg. */
+export const FAKE_CODECS = {
+  version: "7.1",
+  encoders: new Set(["libx264", "libfdk_aac"]),
+  decoders: new Set(["h264"]),
+  videoEncoder: "libx264",
+  hardware: false,
+  audioEncoder: "libfdk_aac",
+};
+
 export const createFakePlatform = (
   overrides: {
     options?: Record<string, unknown>;
     client?: unknown;
     isConnected?: boolean;
     log?: FakeLog;
+    codecs?: unknown;
+    hasCodecs?: boolean;
   } = {},
 ): UnifiProtectPlatform & { log: FakeLog } =>
   ({
     Service: nameProxy,
     Characteristic: nameProxy,
-    api: { hap: { HapStatusError: FakeHapStatusError } },
+    api: { hap: { HapStatusError: FakeHapStatusError, CameraController: FakeCameraController } },
     log: overrides.log ?? createFakeLog(),
     isConnected: overrides.isConnected ?? true,
     client: overrides.client ?? {
       patch: vi.fn<(path: string, body: unknown) => Promise<unknown>>(),
     },
+    codecs: overrides.codecs ?? FAKE_CODECS,
+    // Video off by default in accessory specs: the services under test are the
+    // sensors, and a camera controller would only add noise.
+    hasCodecs: overrides.hasCodecs ?? false,
+    consoleCaFile: undefined,
     options: {
       motionDurationMs: 10_000,
       cameras: [],
+      enableStreaming: true,
+      videoProcessor: "ffmpeg",
+      verboseFfmpeg: false,
+      host: "10.0.0.1",
+      rtspPort: 7441,
       ...overrides.options,
     },
   }) as unknown as UnifiProtectPlatform & { log: FakeLog };
