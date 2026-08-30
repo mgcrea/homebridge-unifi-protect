@@ -168,6 +168,12 @@
         "type": "boolean",
         "default": false,
         "description": "Logs every line ffmpeg produces rather than just the tail of a failure. Very noisy; useful when a stream starts and then stops."
+      },
+      "enableRecording": {
+        "title": "Offer HomeKit Secure Video",
+        "type": "boolean",
+        "default": true,
+        "description": "Offers Secure Video on each camera. Nothing runs until you turn it on for a specific camera in the Home app \u2014 at which point one ffmpeg runs continuously for that camera to hold the few seconds of footage that precede a motion event. Recordings are usually copied rather than re-encoded: the plugin sets the camera's keyframe interval to match HomeKit's fragment length so it can be."
       }
     }
   },
@@ -221,6 +227,7 @@
       "expandable": true,
       "items": [
         "enableStreaming",
+        "enableRecording",
         "videoProcessor",
         "verboseFfmpeg"
       ]

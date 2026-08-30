@@ -18,14 +18,14 @@ UP FloodLights, driven by the console's realtime update stream.
 > it exists so that the code holding admin credentials for a security system is
 > code its author wrote and can audit. If you want breadth, use that one.
 
-> **Status: HomeKit Secure Video is not implemented yet.** Live viewing and
-> snapshots work; recording does not — see [Roadmap](#roadmap).
-
 ## Features
 
 - **Live video and snapshots** over the console's own RTSPS, sent straight
   through without re-encoding whenever HomeKit asks for a size the camera
   already produces.
+- **HomeKit Secure Video**, with the same copy-don't-re-encode approach: the
+  plugin lines the camera's keyframe interval up with HomeKit's fragment length
+  so recordings can be passed through rather than rebuilt.
 - **Cameras** — a motion sensor per camera, held on for a configurable window so
   one person walking up a path is one notification rather than a burst.
 - **Doorbells** — a HomeKit doorbell button, so rings can drive automations.
@@ -83,6 +83,7 @@ Then add the platform, or fill in the form in the Homebridge UI:
 | `exposeNvr` | `false` | Console reachability and free storage. Diagnostics, so opt-in. |
 | `motionDuration` | `10` | Seconds a motion sensor stays tripped. Clamped to 2–300. |
 | `enableStreaming` | `true` | Live video and snapshots. Off keeps motion and doorbell events working. |
+| `enableRecording` | `true` | Offer Secure Video. Costs nothing until enabled per camera in the Home app. |
 | `videoProcessor` | `ffmpeg` | Path to ffmpeg. |
 | `rtspPort` | `7441` | Where Protect serves camera streams. |
 | `verboseFfmpeg` | `false` | Log every ffmpeg line, not just the tail of a failure. |
@@ -150,6 +151,35 @@ Snapshots come from the console's own endpoint first, and fall back to pulling a
 single frame off the live stream — that endpoint fails more often than you would
 expect, and without the fallback the camera tile just spins.
 
+## How recording works
+
+HomeKit Secure Video needs footage from *before* the motion that triggered it —
+by the time Protect reports someone at the door, the part where they walked up
+has already happened. So while Secure Video is armed for a camera, one ffmpeg
+runs continuously for it, holding the last few seconds in memory.
+
+That is the only continuous cost in the plugin, and it is why recording is armed
+per camera in the Home app rather than for everything at once. It is also why
+the copy path matters more here than it does for live viewing: with
+`-codec:v copy` the process is nearly free.
+
+Copying requires fragments to come out the length HomeKit asked for, and ffmpeg
+can only cut a fragment where the camera already placed a keyframe. Protect lets
+that interval be set, so the plugin sets it — asking the camera for keyframes
+every four seconds is much cheaper than spending a CPU core rewriting the stream
+to put them there. If the account is view-only and the write is refused, it
+falls back to re-encoding and says so.
+
+The plugin does no muxing of its own. ffmpeg's MP4 muxer already emits exactly
+what Secure Video consumes — an `ftyp`/`moov` header followed by `moof`/`mdat`
+fragment pairs — so all that is needed is ninety lines that slice the byte
+stream on box boundaries.
+
+One useful asymmetry: **recording works with a plain ffmpeg, live audio does
+not.** Secure Video accepts AAC-LC, which the built-in encoder produces, while
+live streaming only ever negotiates AAC-ELD and needs `libfdk_aac`. A host
+without it records with sound and streams silently.
+
 ### One caveat about RTSPS
 
 The plugin pins the console's certificate for its API connection, but it cannot
@@ -198,7 +228,7 @@ Protect reports nothing at all, forever, with no error anywhere.
 
 1. ✅ Sensors, doorbells, lights, console diagnostics.
 2. ✅ Live streaming and snapshots, over RTSPS.
-3. HomeKit Secure Video.
+3. ✅ HomeKit Secure Video.
 4. Two-way audio.
 
 ## Development
