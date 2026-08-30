@@ -18,12 +18,14 @@ UP FloodLights, driven by the console's realtime update stream.
 > it exists so that the code holding admin credentials for a security system is
 > code its author wrote and can audit. If you want breadth, use that one.
 
-> **Status: video is not implemented yet.** Cameras appear as motion sensors and
-> doorbells as buttons, which covers automations. Live streaming and HomeKit
-> Secure Video are the next two releases — see [Roadmap](#roadmap).
+> **Status: HomeKit Secure Video is not implemented yet.** Live viewing and
+> snapshots work; recording does not — see [Roadmap](#roadmap).
 
 ## Features
 
+- **Live video and snapshots** over the console's own RTSPS, sent straight
+  through without re-encoding whenever HomeKit asks for a size the camera
+  already produces.
 - **Cameras** — a motion sensor per camera, held on for a configurable window so
   one person walking up a path is one notification rather than a burst.
 - **Doorbells** — a HomeKit doorbell button, so rings can drive automations.
@@ -41,6 +43,9 @@ UP FloodLights, driven by the console's realtime update stream.
 - Homebridge 2.0 or newer, on Node 22, 24 or 26.
 - A UniFi console running Protect, reachable on your network.
 - A **Local Access Only** user on the console with Protect permissions.
+- `ffmpeg`, for live video. For camera **audio** it must be built with
+  `libfdk_aac`: HomeKit negotiates the AAC-ELD profile, which no other encoder
+  produces. Without it, streams are video-only and the log says so once.
 
 ## Install
 
@@ -77,7 +82,11 @@ Then add the platform, or fill in the form in the Homebridge UI:
 | `exposeLights` | `true` | UP FloodLight. |
 | `exposeNvr` | `false` | Console reachability and free storage. Diagnostics, so opt-in. |
 | `motionDuration` | `10` | Seconds a motion sensor stays tripped. Clamped to 2–300. |
-| `cameras` | `[]` | Per-camera settings, keyed by MAC. Currently just `exclude`. |
+| `enableStreaming` | `true` | Live video and snapshots. Off keeps motion and doorbell events working. |
+| `videoProcessor` | `ffmpeg` | Path to ffmpeg. |
+| `rtspPort` | `7441` | Where Protect serves camera streams. |
+| `verboseFfmpeg` | `false` | Log every ffmpeg line, not just the tail of a failure. |
+| `cameras` | `[]` | Per-camera settings, keyed by MAC: `exclude`, `channel`. |
 | `debug` | `false` | Logs the console conversation at info level. Verbose. |
 
 ## Credentials
@@ -117,12 +126,50 @@ Trust-on-first-use is only as good as that first moment, so paste the value into
 `fingerprint` once you have it. If the console legitimately reissues its
 certificate, the error names the file to delete.
 
+## How video works
+
+Protect publishes each camera on up to three channels — `high`, `medium`, `low`
+— and the plugin advertises those exact sizes to HomeKit alongside the standard
+ones. That ordering is the whole trick: when HomeKit picks a size the camera
+already produces, the stream is **copied** rather than re-encoded, which is a
+few percent of one CPU core instead of most of one. Otherwise it transcodes,
+using hardware where the host has it (VideoToolbox, NVENC, QuickSync, Rockchip,
+or the Pi's v4l2m2m) and libx264 where it does not.
+
+Channel choice is "the smallest channel that is still big enough", not "the best
+one available" — sending a 4K stream to be scaled down on a phone spends the
+console's uplink and the bridge's CPU on a picture that ends up the same size.
+Override it per camera with `channel` if you disagree.
+
+Protect ships with RTSP switched **off** on every channel, so a camera nobody
+has streamed from has no address at all. The plugin switches the top channel on
+the first time it needs one, provided the configured account may write; if it is
+view-only, the log says so and you can enable it in Protect yourself.
+
+Snapshots come from the console's own endpoint first, and fall back to pulling a
+single frame off the live stream — that endpoint fails more often than you would
+expect, and without the fallback the camera tile just spins.
+
+### One caveat about RTSPS
+
+The plugin pins the console's certificate for its API connection, but it cannot
+for the media connection: ffmpeg accepts a trust anchor and not a fingerprint,
+so it still runs the host name check — and the console's certificate has no IP
+SAN. Addressing the console by **IP** therefore means ffmpeg cannot verify it;
+addressing it by a **host name that resolves to it** means the pinned
+certificate is handed to ffmpeg and verification is real.
+
+What that costs is worth being precise about: no credentials cross the media
+connection. The RTSP alias in the URL is a per-channel bearer token, and the
+media itself is separately encrypted (`enableSrtp`). It is still weaker than the
+API path, and using a host name closes it.
+
 ## How it maps to HomeKit
 
 | Protect | HomeKit |
 |---|---|
-| Camera | Motion Sensor |
-| Doorbell | Motion Sensor + Doorbell |
+| Camera | Camera + Motion Sensor |
+| Doorbell | Camera + Motion Sensor + Doorbell |
 | UP Sense (door) | Contact Sensor + Battery |
 | UP Sense (leak) | Leak Sensor + Battery |
 | UP Sense readings | Temperature / Humidity / Light Sensor |
@@ -150,8 +197,9 @@ Protect reports nothing at all, forever, with no error anywhere.
 ## Roadmap
 
 1. ✅ Sensors, doorbells, lights, console diagnostics.
-2. Live streaming and snapshots, over RTSPS.
+2. ✅ Live streaming and snapshots, over RTSPS.
 3. HomeKit Secure Video.
+4. Two-way audio.
 
 ## Development
 

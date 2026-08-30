@@ -3,7 +3,7 @@
   "pluginType": "platform",
   "singular": true,
   "headerDisplay": "Exposes UniFi Protect cameras, doorbells, UP Sense sensors and UP FloodLights in HomeKit.\n\nThis plugin talks to your console directly over your own network. It never contacts Ubiquiti's cloud, and your password is never written to disk.",
-  "footerDisplay": "**Use a Local Access Only user.** In your console: Settings → Admins → Add Admin → Local Access Only, with Protect permissions. A Ubiquiti cloud (SSO) account usually cannot log in locally, and a bridge that runs unattended cannot answer a two-factor prompt.\n\nOn the first connection the plugin records your console's TLS certificate and logs its fingerprint. Paste that value into **Certificate Fingerprint** to turn trust-on-first-use into an explicit pin.",
+  "footerDisplay": "**Use a Local Access Only user.** In your console: Settings \u2192 Admins \u2192 Add Admin \u2192 Local Access Only, with Protect permissions. A Ubiquiti cloud (SSO) account usually cannot log in locally, and a bridge that runs unattended cannot answer a two-factor prompt.\n\nOn the first connection the plugin records your console's TLS certificate and logs its fingerprint. Paste that value into **Certificate Fingerprint** to turn trust-on-first-use into an explicit pin.",
   "schema": {
     "type": "object",
     "properties": {
@@ -18,7 +18,7 @@
         "type": "string",
         "required": true,
         "placeholder": "10.0.0.1",
-        "description": "Hostname or IP address of your UniFi console — the console itself, not a reverse proxy in front of it. Pasting the full URL from your browser is fine."
+        "description": "Hostname or IP address of your UniFi console \u2014 the console itself, not a reverse proxy in front of it. Pasting the full URL from your browser is fine."
       },
       "port": {
         "title": "Port",
@@ -30,20 +30,22 @@
         "title": "Username",
         "type": "string",
         "required": true,
-        "description": "A Local Access Only user on the console. Give it Protect permissions — View is enough unless you want to control FloodLights from HomeKit."
+        "description": "A Local Access Only user on the console. Give it Protect permissions \u2014 View is enough unless you want to control FloodLights from HomeKit."
       },
       "password": {
         "title": "Password",
         "type": "string",
         "required": true,
-        "x-schema-form": { "type": "password" },
+        "x-schema-form": {
+          "type": "password"
+        },
         "description": "Kept in this config file only. It is never logged and never written to the plugin's own storage."
       },
       "fingerprint": {
         "title": "Certificate Fingerprint",
         "type": "string",
-        "placeholder": "3F2A…C61D",
-        "description": "SHA-256 fingerprint of your console's certificate, printed in the log on first connection. Setting it makes the trust explicit instead of learned — worth doing once. Leave empty to trust whatever the console presents the first time."
+        "placeholder": "3F2A\u2026C61D",
+        "description": "SHA-256 fingerprint of your console's certificate, printed in the log on first connection. Setting it makes the trust explicit instead of learned \u2014 worth doing once. Leave empty to trust whatever the console presents the first time."
       },
       "insecureTls": {
         "title": "Disable certificate verification",
@@ -61,7 +63,7 @@
         "title": "Expose UP Sense sensors",
         "type": "boolean",
         "default": true,
-        "description": "Contact, motion, temperature, humidity, ambient light, leak and battery — whichever of them your sensor is actually reporting."
+        "description": "Contact, motion, temperature, humidity, ambient light, leak and battery \u2014 whichever of them your sensor is actually reporting."
       },
       "exposeLights": {
         "title": "Expose UP FloodLights",
@@ -102,6 +104,37 @@
               "type": "boolean",
               "default": false,
               "description": "Leaves this camera out entirely."
+            },
+            "channel": {
+              "title": "Channel",
+              "type": "string",
+              "oneOf": [
+                {
+                  "title": "Automatic (recommended)",
+                  "enum": [
+                    ""
+                  ]
+                },
+                {
+                  "title": "High",
+                  "enum": [
+                    "high"
+                  ]
+                },
+                {
+                  "title": "Medium",
+                  "enum": [
+                    "medium"
+                  ]
+                },
+                {
+                  "title": "Low",
+                  "enum": [
+                    "low"
+                  ]
+                }
+              ],
+              "description": "Force this camera to stream from one channel instead of letting the plugin match the resolution HomeKit asked for. Automatic is almost always right: it picks the smallest channel that is still big enough, which is also the one that can be sent without re-encoding."
             }
           }
         }
@@ -110,7 +143,31 @@
         "title": "Debug logging",
         "type": "boolean",
         "default": false,
-        "description": "Logs the plugin's conversation with the console at info level, so it shows up without putting the whole bridge into debug mode. Verbose — turn it on to diagnose something, not to leave running."
+        "description": "Logs the plugin's conversation with the console at info level, so it shows up without putting the whole bridge into debug mode. Verbose \u2014 turn it on to diagnose something, not to leave running."
+      },
+      "rtspPort": {
+        "title": "RTSPS Port",
+        "type": "integer",
+        "default": 7441,
+        "description": "The port Protect serves camera streams on. Separate from the web interface port, and rarely different from the default."
+      },
+      "enableStreaming": {
+        "title": "Enable live video",
+        "type": "boolean",
+        "default": true,
+        "description": "Adds live streaming and snapshots to each camera. Needs ffmpeg on this host. Turning it off keeps motion and doorbell events working, which is worth doing if ffmpeg is unavailable or the bridge is too small to transcode."
+      },
+      "videoProcessor": {
+        "title": "ffmpeg Path",
+        "type": "string",
+        "placeholder": "ffmpeg",
+        "description": "Path to an ffmpeg binary. Leave empty to use whichever one is on the PATH. For camera audio it must be built with libfdk_aac \u2014 HomeKit negotiates AAC-ELD, which no other encoder produces."
+      },
+      "verboseFfmpeg": {
+        "title": "Verbose ffmpeg logging",
+        "type": "boolean",
+        "default": false,
+        "description": "Logs every line ffmpeg produces rather than just the tail of a failure. Very noisy; useful when a stream starts and then stops."
       }
     }
   },
@@ -119,13 +176,23 @@
       "type": "fieldset",
       "title": "Console",
       "expandable": false,
-      "items": ["host", "username", "password"]
+      "items": [
+        "host",
+        "username",
+        "password"
+      ]
     },
     {
       "type": "fieldset",
       "title": "Accessories",
       "expandable": true,
-      "items": ["exposeCameras", "exposeSensors", "exposeLights", "exposeNvr", "motionDuration"]
+      "items": [
+        "exposeCameras",
+        "exposeSensors",
+        "exposeLights",
+        "exposeNvr",
+        "motionDuration"
+      ]
     },
     {
       "type": "fieldset",
@@ -135,21 +202,48 @@
         {
           "key": "cameras",
           "type": "array",
-          "items": [{ "key": "cameras[]", "items": ["cameras[].mac", "cameras[].exclude"] }]
+          "items": [
+            {
+              "key": "cameras[]",
+              "items": [
+                "cameras[].mac",
+                "cameras[].channel",
+                "cameras[].exclude"
+              ]
+            }
+          ]
         }
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Video",
+      "expandable": true,
+      "items": [
+        "enableStreaming",
+        "videoProcessor",
+        "verboseFfmpeg"
       ]
     },
     {
       "type": "fieldset",
       "title": "Security",
       "expandable": true,
-      "items": ["fingerprint", "insecureTls"]
+      "items": [
+        "fingerprint",
+        "insecureTls"
+      ]
     },
     {
       "type": "fieldset",
       "title": "Advanced",
       "expandable": true,
-      "items": ["name", "port", "debug"]
+      "items": [
+        "name",
+        "port",
+        "rtspPort",
+        "debug"
+      ]
     }
   ]
 }
