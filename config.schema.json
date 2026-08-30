@@ -1,0 +1,155 @@
+{
+  "pluginAlias": "UniFiProtect",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Exposes UniFi Protect cameras, doorbells, UP Sense sensors and UP FloodLights in HomeKit.\n\nThis plugin talks to your console directly over your own network. It never contacts Ubiquiti's cloud, and your password is never written to disk.",
+  "footerDisplay": "**Use a Local Access Only user.** In your console: Settings → Admins → Add Admin → Local Access Only, with Protect permissions. A Ubiquiti cloud (SSO) account usually cannot log in locally, and a bridge that runs unattended cannot answer a two-factor prompt.\n\nOn the first connection the plugin records your console's TLS certificate and logs its fingerprint. Paste that value into **Certificate Fingerprint** to turn trust-on-first-use into an explicit pin.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "UniFi Protect",
+        "description": "The name shown in the Homebridge log for this platform."
+      },
+      "host": {
+        "title": "Console Address",
+        "type": "string",
+        "required": true,
+        "placeholder": "10.0.0.1",
+        "description": "Hostname or IP address of your UniFi console — the console itself, not a reverse proxy in front of it. Pasting the full URL from your browser is fine."
+      },
+      "port": {
+        "title": "Port",
+        "type": "integer",
+        "default": 443,
+        "description": "Only change this if your console serves its web interface somewhere other than 443."
+      },
+      "username": {
+        "title": "Username",
+        "type": "string",
+        "required": true,
+        "description": "A Local Access Only user on the console. Give it Protect permissions — View is enough unless you want to control FloodLights from HomeKit."
+      },
+      "password": {
+        "title": "Password",
+        "type": "string",
+        "required": true,
+        "x-schema-form": { "type": "password" },
+        "description": "Kept in this config file only. It is never logged and never written to the plugin's own storage."
+      },
+      "fingerprint": {
+        "title": "Certificate Fingerprint",
+        "type": "string",
+        "placeholder": "3F2A…C61D",
+        "description": "SHA-256 fingerprint of your console's certificate, printed in the log on first connection. Setting it makes the trust explicit instead of learned — worth doing once. Leave empty to trust whatever the console presents the first time."
+      },
+      "insecureTls": {
+        "title": "Disable certificate verification",
+        "type": "boolean",
+        "default": false,
+        "description": "Turns off certificate checking entirely, which lets anything on your network that can answer for the console read these credentials. Only enable this to work around a problem, and expect a warning in the log every time the plugin starts."
+      },
+      "exposeCameras": {
+        "title": "Expose cameras and doorbells",
+        "type": "boolean",
+        "default": true,
+        "description": "Adds a motion sensor for each camera, and a doorbell button for each doorbell."
+      },
+      "exposeSensors": {
+        "title": "Expose UP Sense sensors",
+        "type": "boolean",
+        "default": true,
+        "description": "Contact, motion, temperature, humidity, ambient light, leak and battery — whichever of them your sensor is actually reporting."
+      },
+      "exposeLights": {
+        "title": "Expose UP FloodLights",
+        "type": "boolean",
+        "default": true,
+        "description": "Adds a dimmable light and its built-in motion sensor."
+      },
+      "exposeNvr": {
+        "title": "Expose console diagnostics",
+        "type": "boolean",
+        "default": false,
+        "description": "Adds two tiles for the console itself: whether the plugin is talking to it, and how much recording space is left. Useful for automations that warn you when either goes wrong; off by default because they are diagnostics rather than devices."
+      },
+      "motionDuration": {
+        "title": "Motion Duration (seconds)",
+        "type": "integer",
+        "default": 10,
+        "minimum": 2,
+        "maximum": 300,
+        "description": "How long a motion sensor stays tripped after the console reports motion. Protect reports movement as a stream of events seconds apart, so a short window turns one person walking up a path into a burst of notifications. Values outside the range are clamped rather than rejected."
+      },
+      "cameras": {
+        "title": "Per-camera Settings",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "title": "Camera",
+          "properties": {
+            "mac": {
+              "title": "MAC Address",
+              "type": "string",
+              "required": true,
+              "placeholder": "AA:BB:CC:DD:EE:FF",
+              "description": "Shown by `pnpm diagnose`, and in Protect under the camera's details. Punctuation does not matter."
+            },
+            "exclude": {
+              "title": "Hide from HomeKit",
+              "type": "boolean",
+              "default": false,
+              "description": "Leaves this camera out entirely."
+            }
+          }
+        }
+      },
+      "debug": {
+        "title": "Debug logging",
+        "type": "boolean",
+        "default": false,
+        "description": "Logs the plugin's conversation with the console at info level, so it shows up without putting the whole bridge into debug mode. Verbose — turn it on to diagnose something, not to leave running."
+      }
+    }
+  },
+  "layout": [
+    {
+      "type": "fieldset",
+      "title": "Console",
+      "expandable": false,
+      "items": ["host", "username", "password"]
+    },
+    {
+      "type": "fieldset",
+      "title": "Accessories",
+      "expandable": true,
+      "items": ["exposeCameras", "exposeSensors", "exposeLights", "exposeNvr", "motionDuration"]
+    },
+    {
+      "type": "fieldset",
+      "title": "Per-camera Settings",
+      "expandable": true,
+      "items": [
+        {
+          "key": "cameras",
+          "type": "array",
+          "items": [{ "key": "cameras[]", "items": ["cameras[].mac", "cameras[].exclude"] }]
+        }
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Security",
+      "expandable": true,
+      "items": ["fingerprint", "insecureTls"]
+    },
+    {
+      "type": "fieldset",
+      "title": "Advanced",
+      "expandable": true,
+      "items": ["name", "port", "debug"]
+    }
+  ]
+}

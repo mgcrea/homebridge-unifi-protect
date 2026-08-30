@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Charles session captures — contain real tokens, emails and device identifiers.
+# Never commit these; scrubbed fixtures live in test/fixtures/ instead.
+.idea/
+*.chlsj
+*.chls
+
+# Local probe credentials
+.env
+.env.local
+
+# Local Homebridge instance for development — config.json holds the account
+# password in plaintext, and persist/ holds the paired HomeKit keys.
+.homebridge/
+
+# Session and pinned-certificate cache written by scripts/diagnose.ts
+.cache/
