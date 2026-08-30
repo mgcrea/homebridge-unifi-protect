@@ -107,6 +107,33 @@ export const enableRtsp = async (
 };
 
 /**
+ * Set a channel's keyframe interval.
+ *
+ * This is what makes HomeKit Secure Video affordable. With `-codec:v copy`
+ * ffmpeg can only cut a fragment where the camera already placed a keyframe, so
+ * a camera whose interval does not divide HomeKit's fragment length has to be
+ * re-encoded for every recording. Protect lets the interval be set, so it is
+ * cheaper to ask the camera for keyframes where they are wanted than to spend a
+ * CPU core rewriting the stream.
+ *
+ * Written as a whole-array read-modify-write for the same reason as
+ * `enableRtsp`: patching one channel object replaces the array with a
+ * one-element one and disables the others.
+ */
+export const alignIdrInterval = async (
+  client: ProtectClient,
+  camera: Camera,
+  channelId: number,
+  seconds: number,
+): Promise<void> => {
+  const channels = camera.channels.map((channel) => ({
+    ...channel,
+    idrInterval: channel.id === channelId ? seconds : channel.idrInterval,
+  }));
+  await client.patch(`cameras/${camera.id}`, { channels });
+};
+
+/**
  * The resolutions to advertise to HomeKit for a camera.
  *
  * The camera's own channel sizes come first, because a resolution HomeKit picks

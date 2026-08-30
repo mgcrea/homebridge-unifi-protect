@@ -63,6 +63,31 @@ export const StreamRequestType = {
   STOP: "stop",
 } as const;
 
+/** `AudioRecordingCodecType` — what HKSV accepts, which is not what live streaming accepts. */
+export const AudioRecordingCodec = {
+  AAC_LC: 0,
+  AAC_ELD: 1,
+} as const;
+export type AudioRecordingCodec = (typeof AudioRecordingCodec)[keyof typeof AudioRecordingCodec];
+
+/** `AudioRecordingSamplerate` — an index, not a rate. */
+export const AudioRecordingSamplerate = {
+  KHZ_8: 0,
+  KHZ_16: 1,
+  KHZ_24: 2,
+  KHZ_32: 3,
+  KHZ_44_1: 4,
+  KHZ_48: 5,
+} as const;
+
+/** The rate in Hz that a `AudioRecordingSamplerate` index stands for. */
+export const recordingSamplerateHz = (value: number): number =>
+  [8000, 16000, 24000, 32000, 44100, 48000][value] ?? 32000;
+
+/** The ffmpeg `-profile:a` value for a recording codec HomeKit selected. */
+export const ffmpegAudioProfile = (codec: number): string =>
+  codec === AudioRecordingCodec.AAC_ELD ? "aac_eld" : "aac_low";
+
 /** The ffmpeg `-profile:v` value for a profile HomeKit asked for. */
 export const ffmpegProfile = (profile: H264Profile): string => {
   switch (profile) {

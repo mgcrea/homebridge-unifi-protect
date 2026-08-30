@@ -49,6 +49,7 @@ const zConfig = z.looseObject({
   cameras: z.array(zPerCamera).optional(),
 
   enableStreaming: z.boolean().optional(),
+  enableRecording: z.boolean().optional(),
   videoProcessor: z.string().optional(),
   verboseFfmpeg: z.boolean().optional(),
 
@@ -76,6 +77,7 @@ export type UnifiProtectConfig = {
   motionDurationMs: number;
   cameras: CameraOverride[];
   enableStreaming: boolean;
+  enableRecording: boolean;
   videoProcessor: string;
   verboseFfmpeg: boolean;
   debug: boolean;
@@ -140,6 +142,11 @@ export const parseConfig = (config: PlatformConfig): UnifiProtectConfig => {
     // enable RTSP — so it can be switched off while keeping motion and
     // doorbell events working.
     enableStreaming: raw.enableStreaming ?? true,
+    // HomeKit Secure Video is offered but does nothing until the user turns it
+    // on per camera in the Home app, at which point one ffmpeg runs
+    // continuously for that camera to keep the pre-event buffer. Offering it is
+    // free; that cost is the user's to opt into.
+    enableRecording: raw.enableRecording ?? true,
     videoProcessor: raw.videoProcessor ?? "ffmpeg",
     verboseFfmpeg: raw.verboseFfmpeg ?? false,
 

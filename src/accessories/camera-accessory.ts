@@ -5,11 +5,14 @@ import { BaseAccessory } from "#accessories/base-accessory";
 import {
   AudioBitrate,
   AudioCodec,
+  AudioRecordingCodec,
+  AudioRecordingSamplerate,
   AudioSamplerate,
   H264Level,
   H264Profile,
   SrtpCryptoSuite,
 } from "#media/hap";
+import { RecordingDelegate } from "#media/recording-delegate";
 import { advertisedResolutions } from "#media/rtsp";
 import { StreamingDelegate } from "#media/streaming-delegate";
 import type { UnifiProtectPlatform } from "#platform";
@@ -26,6 +29,7 @@ export class CameraAccessory extends BaseAccessory<Camera> {
   readonly #motion: Service;
   readonly #doorbell: Service | undefined;
   readonly #streaming: StreamingDelegate | undefined;
+  readonly #recording: RecordingDelegate | undefined;
   readonly #controller: CameraController | undefined;
 
   #motionTimer: NodeJS.Timeout | undefined;
@@ -75,7 +79,14 @@ export class CameraAccessory extends BaseAccessory<Camera> {
 
     if (platform.options.enableStreaming && platform.hasCodecs) {
       this.#streaming = new StreamingDelegate(platform, () => this.device);
-      this.#controller = this.#buildController(this.#streaming);
+      this.#recording = platform.options.enableRecording
+        ? new RecordingDelegate(
+            platform,
+            () => this.device,
+            (channel) => this.#streaming!.inputFor(channel),
+          )
+        : undefined;
+      this.#controller = this.#buildController(this.#streaming, this.#recording);
       accessory.configureController(this.#controller);
     }
 
@@ -92,7 +103,10 @@ export class CameraAccessory extends BaseAccessory<Camera> {
    * stream and no explanation, where offering none at all gets them a working
    * picture.
    */
-  #buildController(delegate: StreamingDelegate): CameraController {
+  #buildController(
+    delegate: StreamingDelegate,
+    recording: RecordingDelegate | undefined,
+  ): CameraController {
     const { codecs } = this.platform;
 
     return new this.platform.api.hap.CameraController({
@@ -125,8 +139,51 @@ export class CameraAccessory extends BaseAccessory<Camera> {
             }
           : {}),
       },
+      ...(recording
+        ? {
+            recording: {
+              delegate: recording,
+              options: {
+                // Four seconds of history before the trigger, which is what
+                // HomeKit cameras conventionally offer and what makes a clip
+                // start with someone approaching rather than already at the door.
+                prebufferLength: 4000,
+                mediaContainerConfiguration: {
+                  type: 0, // MediaContainerType.FRAGMENTED_MP4
+                  fragmentLength: 4000,
+                },
+                video: {
+                  type: 0, // VideoCodecType.H264
+                  parameters: {
+                    profiles: [H264Profile.BASELINE, H264Profile.MAIN, H264Profile.HIGH],
+                    levels: [H264Level.LEVEL3_1, H264Level.LEVEL3_2, H264Level.LEVEL4_0],
+                  },
+                  resolutions: advertisedResolutions(this.device),
+                },
+                audio: {
+                  codecs: [
+                    {
+                      // AAC-LC, which ffmpeg's built-in encoder produces. Live
+                      // streaming needs AAC-ELD and therefore libfdk_aac; a
+                      // recording does not, so a host without it still records
+                      // with sound even though it streams silently.
+                      type: AudioRecordingCodec.AAC_LC,
+                      audioChannels: 1,
+                      bitrateMode: AudioBitrate.VARIABLE,
+                      samplerate: [
+                        AudioRecordingSamplerate.KHZ_24,
+                        AudioRecordingSamplerate.KHZ_32,
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          }
+        : {}),
       // The controller takes over the motion service the accessory already
-      // built, rather than adding a second one beside it.
+      // built, rather than adding a second one beside it. Secure Video uses it
+      // as the recording trigger.
       sensors: { motion: this.#motion },
     });
   }
@@ -186,6 +243,7 @@ export class CameraAccessory extends BaseAccessory<Camera> {
   override dispose(): void {
     super.dispose();
     this.#streaming?.dispose();
+    this.#recording?.dispose();
     this.#motionTimer = undefined;
   }
 

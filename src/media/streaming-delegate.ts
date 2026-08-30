@@ -57,6 +57,11 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     return this.#camera().name ?? this.#camera().id;
   }
 
+  /** How ffmpeg reaches the console's RTSPS. Shared with the recording delegate. */
+  inputFor(channel: CameraChannel): InputOptions {
+    return this.#input(channel);
+  }
+
   /** How ffmpeg reaches the console's RTSPS, or undefined if nothing is streamable. */
   #input(channel: CameraChannel): InputOptions {
     return {
