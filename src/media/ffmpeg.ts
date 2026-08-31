@@ -28,6 +28,14 @@ export type FfmpegOptions = {
   args: string[];
   /** Log every line ffmpeg produces, not just the tail on failure. */
   verbose?: boolean;
+  /**
+   * Written to the process's stdin and closed.
+   *
+   * Used for an SDP describing a stream: it carries the session's SRTP key,
+   * and a file would leave that key on disk while `-i` would put it in the
+   * process list for anyone on the box to read.
+   */
+  stdin?: string;
   /** Called when the process ends for any reason, including our own stop(). */
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
 };
@@ -52,6 +60,13 @@ export class FfmpegProcess {
     options.platform.debug(`${this.#name}: ${command} ${options.args.join(" ")}`);
 
     this.#process = spawn(command, options.args, { env: process.env });
+
+    if (options.stdin !== undefined) {
+      // A closed stdin is how ffmpeg knows the SDP is complete. An EPIPE here
+      // means the process died before reading it, which its own exit reports.
+      this.#process.stdin.on("error", () => undefined);
+      this.#process.stdin.end(options.stdin);
+    }
 
     this.#process.stderr.setEncoding("utf8");
     this.#process.stderr.on("data", (chunk: string) => {

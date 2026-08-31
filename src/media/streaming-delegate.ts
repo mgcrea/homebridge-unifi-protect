@@ -8,12 +8,14 @@ import type {
   StreamingRequest,
   StreamRequestCallback,
 } from "homebridge";
-import type { Camera, CameraChannel } from "@mgcrea/unifi-protect";
+import { talkbackTarget, type Camera, type CameraChannel } from "@mgcrea/unifi-protect";
 
 import { enableRtsp, namedChannel, rtspUrl, selectChannel, usableChannels } from "#media/rtsp";
 
 import { FfmpegProcess } from "#media/ffmpeg";
 import { RtpPortAllocator } from "#media/rtp/port-allocator";
+import { RtpSplitter } from "#media/rtp/splitter";
+import { talkbackArgs, talkbackSdp } from "#media/talkback-args";
 import { StreamRequestType } from "#media/hap";
 import { canCopyVideo, streamArgs, type InputOptions, type StreamTarget } from "#media/stream-args";
 import { takeSnapshot } from "#media/snapshot";
@@ -27,6 +29,16 @@ type PreparedSession = {
   video: { localPort: number; remotePort: number; ssrc: number; key: Buffer; salt: Buffer };
   audio: { localPort: number; remotePort: number; ssrc: number; key: Buffer; salt: Buffer };
   process?: FfmpegProcess;
+  /** Two-way audio, present only on cameras that have a speaker. */
+  talkback?: {
+    /** Owns the audio port so the two ffmpegs can share it. */
+    splitter: RtpSplitter;
+    /** Where the outgoing ffmpeg sends from, since the splitter has the port. */
+    outgoingPort: number;
+    /** Where the talkback ffmpeg listens for HomeKit's voice. */
+    incomingPort: number;
+    process?: FfmpegProcess;
+  };
 };
 
 /**
@@ -142,6 +154,22 @@ export class StreamingDelegate implements CameraStreamingDelegate {
           this.#ports.reserve(),
         ]);
 
+        // Two-way audio changes who owns the audio port. HomeKit sends its
+        // voice to the same port it expects ours to arrive from, so the
+        // splitter binds it and the outgoing ffmpeg gets one of its own.
+        const target = talkbackTarget(this.#camera());
+        let talkback: PreparedSession["talkback"];
+        if (target && this.#platform.codecs.audioEncoder) {
+          const [outgoingPort, incomingPort] = await Promise.all([
+            this.#ports.reserve(),
+            this.#ports.reserve(),
+          ]);
+          const splitter = await RtpSplitter.bind(audioPort);
+          splitter.forwardRtcpTo(outgoingPort);
+          splitter.forwardAudioTo(incomingPort);
+          talkback = { splitter, outgoingPort, incomingPort };
+        }
+
         const session: PreparedSession = {
           targetAddress: request.targetAddress,
           video: {
@@ -161,6 +189,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
             salt: request.audio.srtp_salt,
           },
         };
+        if (talkback) session.talkback = talkback;
         this.#sessions.set(request.sessionID, session);
 
         callback(undefined, {
@@ -255,7 +284,10 @@ export class StreamingDelegate implements CameraStreamingDelegate {
           target: {
             address: session.targetAddress,
             port: session.audio.remotePort,
-            localPort: session.audio.localPort,
+            // With two-way audio the splitter has the negotiated port, so the
+            // outgoing leg sends from its own. HomeKit matches the stream by
+            // SSRC rather than source port, so it does not mind.
+            localPort: session.talkback?.outgoingPort ?? session.audio.localPort,
             srtpKey: session.audio.key,
             srtpSalt: session.audio.salt,
             ssrc: session.audio.ssrc,
@@ -298,12 +330,64 @@ export class StreamingDelegate implements CameraStreamingDelegate {
       onExit: () => this.#release(request.sessionID),
     });
 
+    this.#startTalkback(session, request);
+
     callback();
+  }
+
+  /**
+   * The return leg: HomeKit's voice, re-encoded for the camera's own speaker.
+   *
+   * Failures here are logged and swallowed. A camera whose talkback will not
+   * start is still a camera worth watching, and taking the whole session down
+   * would cost the picture as well as the voice.
+   */
+  #startTalkback(
+    session: PreparedSession,
+    request: Extract<StreamingRequest, { type: typeof StreamRequestType.START }>,
+  ): void {
+    const talkback = session.talkback;
+    const target = talkbackTarget(this.#camera());
+    const encoder = this.#platform.codecs.audioEncoder;
+    if (!talkback || !target || !encoder) return;
+
+    const stream = {
+      localPort: talkback.incomingPort,
+      payloadType: request.audio.pt,
+      samplerateKhz: request.audio.sample_rate,
+      srtpKey: session.audio.key,
+      srtpSalt: session.audio.salt,
+    };
+
+    try {
+      talkback.process = new FfmpegProcess({
+        platform: this.#platform,
+        name: `${this.#name} (talkback)`,
+        args: talkbackArgs({
+          stream,
+          target,
+          // The encoder probe only ever returns libfdk_aac, which is the one
+          // decoder that reads HomeKit's ELD; the camera wants plain AAC-LC
+          // back, which ffmpeg's built-in encoder produces.
+          audioDecoder: encoder,
+          audioEncoder: "aac",
+        }),
+        verbose: this.#platform.options.verboseFfmpeg,
+        // The SDP carries the session's SRTP key, so it goes in on stdin
+        // rather than as a file or an argument, where it would be readable by
+        // anyone who can list processes.
+        stdin: talkbackSdp(stream),
+      });
+      this.#platform.debug(`${this.#name}: talkback open to ${target.host}:${target.port}.`);
+    } catch (error) {
+      this.#platform.log.warn(`${this.#name}: two-way audio failed to start — ${describe(error)}`);
+    }
   }
 
   #stop(sessionID: string): void {
     const session = this.#sessions.get(sessionID);
     session?.process?.stop();
+    session?.talkback?.process?.stop();
     this.#release(sessionID);
   }
 
@@ -312,6 +396,11 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     if (!session) return;
     this.#ports.release(session.video.localPort);
     this.#ports.release(session.audio.localPort);
+    if (session.talkback) {
+      session.talkback.splitter.close();
+      this.#ports.release(session.talkback.outgoingPort);
+      this.#ports.release(session.talkback.incomingPort);
+    }
     this.#sessions.delete(sessionID);
   }
 
@@ -321,8 +410,14 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     // map while iterating it.
     for (const session of this.#sessions.values()) {
       session.process?.stop();
+      session.talkback?.process?.stop();
+      session.talkback?.splitter.close();
       this.#ports.release(session.video.localPort);
       this.#ports.release(session.audio.localPort);
+      if (session.talkback) {
+        this.#ports.release(session.talkback.outgoingPort);
+        this.#ports.release(session.talkback.incomingPort);
+      }
     }
     this.#sessions.clear();
   }

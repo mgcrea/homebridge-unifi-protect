@@ -2,6 +2,7 @@ import type { CameraController, PlatformAccessory, Service } from "homebridge";
 import {
   cameraAmbientLux,
   hasAmbientLightSensor,
+  hasTwoWayAudio,
   isDoorbell,
   smartDetectGate,
   type Camera,
@@ -164,7 +165,10 @@ export class CameraAccessory extends BaseAccessory<Camera> {
                     samplerate: [AudioSamplerate.KHZ_16, AudioSamplerate.KHZ_24],
                   },
                 ],
-                twoWayAudio: false,
+                // Only where the hardware has a speaker. Advertising it
+                // otherwise puts a microphone button in the Home app that
+                // does nothing when pressed.
+                twoWayAudio: hasTwoWayAudio(this.device),
               },
             }
           : {}),
