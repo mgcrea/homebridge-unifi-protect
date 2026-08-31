@@ -28,6 +28,15 @@ import { cameraOverrideFor } from "#config";
 import { describe } from "#util/describe";
 import type { UnifiProtectPlatform } from "#platform";
 
+/**
+ * How long one fetched snapshot answers for.
+ *
+ * Long enough to collapse the Home app's repeated asks for the same tile,
+ * short enough that nobody sees a stale frame: the console's own snapshot is
+ * already a second or two behind, so adding two more is invisible.
+ */
+const SNAPSHOT_REUSE_MS = 2000;
+
 /** A session between `prepareStream` and the `start` that follows it. */
 type PreparedSession = {
   targetAddress: string;
@@ -64,6 +73,19 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
   /** Warned once per camera rather than on every request, which HomeKit repeats. */
   #warnedNoChannel = false;
+
+  /**
+   * The snapshot most recently asked for, and the request that produced it.
+   *
+   * The Home app asks for the same camera several times within a few seconds —
+   * four times in twelve, observed — and every ask costs the console real work.
+   * Holding the promise rather than the image serves two purposes at once:
+   * a second ask that arrives while the first is still in flight waits on it
+   * instead of starting another, and one that arrives just after reuses the
+   * result. A rejection is dropped immediately so a single failure is not
+   * cached and replayed.
+   */
+  #snapshot: { key: string; at: number; image: Promise<Buffer> } | undefined;
 
   constructor(platform: UnifiProtectPlatform, camera: () => Camera) {
     this.#platform = platform;
@@ -143,24 +165,42 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
   handleSnapshotRequest(request: SnapshotRequest, callback: SnapshotRequestCallback): void {
     void (async () => {
-      const camera = this.#camera();
-      const channel = selectChannel(usableChannels(camera), request);
-
       try {
-        const image = await takeSnapshot({
-          platform: this.#platform,
-          client: this.#platform.client,
-          camera,
-          name: this.#name,
-          input: channel ? this.#input(channel) : undefined,
-          request,
-        });
-        callback(undefined, image);
+        callback(undefined, await this.#snapshotFor(request));
       } catch (error) {
         this.#platform.log.warn(`${this.#name}: snapshot failed — ${describe(error)}`);
         callback(error instanceof Error ? error : new Error(String(error)));
       }
     })();
+  }
+
+  /** One image per camera per window, however many times HomeKit asks. */
+  #snapshotFor(request: SnapshotRequest): Promise<Buffer> {
+    const key = `${request.width}x${request.height}`;
+    const cached = this.#snapshot;
+    if (cached && cached.key === key && Date.now() - cached.at < SNAPSHOT_REUSE_MS) {
+      return cached.image;
+    }
+
+    const camera = this.#camera();
+    const channel = selectChannel(usableChannels(camera), request);
+    const image = takeSnapshot({
+      platform: this.#platform,
+      client: this.#platform.client,
+      camera,
+      name: this.#name,
+      input: channel ? this.#input(channel) : undefined,
+      request,
+    });
+
+    const entry = { key, at: Date.now(), image };
+    this.#snapshot = entry;
+    // Never leave a failure behind to be served to the next caller.
+    image.catch(() => {
+      if (this.#snapshot === entry) this.#snapshot = undefined;
+    });
+
+    return image;
   }
 
   prepareStream(request: PrepareStreamRequest, callback: PrepareStreamCallback): void {

@@ -27,7 +27,13 @@ export const fetchConsoleSnapshot = async (
       // Protect caches snapshots hard; without a changing timestamp every
       // request after the first comes back as the same frame.
       ts: Date.now(),
-      force: true,
+      // Deliberately NOT `force`. Forcing makes the console pull a fresh frame
+      // off the camera, and the Home app asks for every tile at once: thirteen
+      // forced grabs back to back on a console already recording twelve
+      // streams. An RTSPS handshake attempted during that burst failed with a
+      // bare `[tls] Unknown error`, which is a miserable thing to diagnose from
+      // the outside. The console's own recent frame is what Protect's app
+      // shows and is current enough for a tile.
       w: request.width,
       h: request.height,
     },
