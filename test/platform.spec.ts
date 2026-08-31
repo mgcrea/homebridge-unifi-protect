@@ -350,6 +350,50 @@ describe("UnifiProtectPlatform", () => {
     expect(log.info.mock.calls.some((call) => String(call[0]).includes("fingerprint"))).toBe(true);
   });
 
+  it("shows its own debug output when the plugin's debug box is ticked", async () => {
+    // Homebridge hides `log.debug` unless the WHOLE bridge runs with -D, so a
+    // per-plugin debug option that only reached that channel would look broken:
+    // the client's output would appear and the plugin's own would not.
+    protect.reset();
+    protect.store.nvr = NVR;
+    protect.store.cameras = () => [camera()];
+    const { log } = await start({ ...CONFIG, debug: true } as unknown as PlatformConfig);
+
+    protect.captured.store?.["onEvent"]?.({
+      id: "e1",
+      type: "motion",
+      camera: "cam-1",
+      start: 1,
+      smartDetectTypes: [],
+    } as never);
+
+    expect(log.info.mock.calls.some((call) => String(call[0]).includes("Front Door: motion"))).toBe(
+      true,
+    );
+  });
+
+  it("keeps its debug output off the info channel when the box is not ticked", async () => {
+    protect.reset();
+    protect.store.nvr = NVR;
+    protect.store.cameras = () => [camera()];
+    const { log } = await start();
+
+    protect.captured.store?.["onEvent"]?.({
+      id: "e1",
+      type: "motion",
+      camera: "cam-1",
+      start: 1,
+      smartDetectTypes: [],
+    } as never);
+
+    expect(log.info.mock.calls.some((call) => String(call[0]).includes("Front Door: motion"))).toBe(
+      false,
+    );
+    expect(
+      log.debug.mock.calls.some((call) => String(call[0]).includes("Front Door: motion")),
+    ).toBe(true);
+  });
+
   it("reports a console it cannot reach instead of throwing into the bridge", async () => {
     protect.reset();
     protect.connectProtect.mockRejectedValueOnce(new Error("ECONNREFUSED"));

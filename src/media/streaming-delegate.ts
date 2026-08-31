@@ -198,7 +198,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
         // on a phone moving between WiFi and cellular is often. Restarting
         // ffmpeg to honour it would black the picture out for a second every
         // time; acknowledging and carrying on is what viewers actually want.
-        this.#platform.log.debug(`${this.#name}: ignoring a mid-stream reconfigure request.`);
+        this.#platform.debug(`${this.#name}: ignoring a mid-stream reconfigure request.`);
         callback();
         return;
 

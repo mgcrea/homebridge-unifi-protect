@@ -162,7 +162,7 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
           onNvrChanged: (nvr) => this.#onDeviceChanged(nvr as never),
           onConnectionState: (state) => {
             this.#connected = state === "connected";
-            if (state === "connected") this.log.debug("Realtime stream connected.");
+            if (state === "connected") this.debug("Realtime stream connected.");
             if (state === "disconnected") this.log.warn("Lost the console's realtime stream.");
           },
           // A resync means the console's state was re-read wholesale, so
@@ -219,7 +219,7 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
     const pem = this.#connection?.tlsOptions.ca?.[0];
     if (!pem || isIP(this.options.host)) {
       if (pem) {
-        this.log.debug(
+        this.debug(
           "The console is addressed by IP, so ffmpeg cannot verify its certificate for RTSPS — " +
             "the certificate carries no IP SAN. No credentials cross that connection.",
         );
@@ -232,7 +232,7 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
       await writeFile(path, pem, { mode: 0o600 });
       return path;
     } catch (error) {
-      this.log.debug(`Could not write the console certificate for ffmpeg: ${describe(error)}`);
+      this.debug(`Could not write the console certificate for ffmpeg: ${describe(error)}`);
       return undefined;
     }
   }
@@ -414,9 +414,23 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
   }
 
   /**
+   * The plugin's own debug channel.
+   *
+   * Homebridge routes `log.debug` to a stream it hides unless the WHOLE bridge
+   * runs with `-D`, so a per-plugin `debug` box that only reached `log.debug`
+   * would appear to do nothing — which is exactly how it looked while chasing a
+   * camera that seemed never to report motion. Everything the plugin owns logs
+   * through here instead, and the client's logger below does the same thing for
+   * the half of the output that comes from the package.
+   */
+  debug(message: string): void {
+    if (this.#config?.debug) this.log.info(`[debug] ${message}`);
+    else this.log.debug(message);
+  }
+
+  /**
    * The client's logger. `debug` is promoted to `info` when the user asked for
-   * it, because Homebridge hides debug output unless the whole bridge is in
-   * debug mode — which is not what someone ticking a per-plugin box expects.
+   * it, for the reason given on `debug` above.
    */
   #logger(debug: boolean): Logger {
     return {

@@ -87,7 +87,7 @@ export const takeSnapshot = async (options: {
   try {
     return await fetchConsoleSnapshot(options.client, options.camera, request);
   } catch (error) {
-    platform.log.debug(`${name}: the console would not produce a snapshot — ${describe(error)}`);
+    platform.debug(`${name}: the console would not produce a snapshot — ${describe(error)}`);
   }
 
   if (!options.input) {

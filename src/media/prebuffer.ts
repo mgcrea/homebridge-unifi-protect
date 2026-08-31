@@ -65,7 +65,7 @@ export class Prebuffer {
         // stopped being able to record. Restart it, unless we are the ones who
         // stopped it.
         if (!this.#stopped) {
-          this.#options.platform.log.debug(
+          this.#options.platform.debug(
             `${this.#options.name}: prebuffer ended unexpectedly; restarting it.`,
           );
           setTimeout(() => {

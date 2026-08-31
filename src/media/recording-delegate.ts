@@ -168,7 +168,7 @@ export class RecordingDelegate implements CameraRecordingDelegate {
       return;
     }
 
-    this.#platform.log.debug(`${this.#name}: recording stream ${streamId} started.`);
+    this.#platform.debug(`${this.#name}: recording stream ${streamId} started.`);
 
     try {
       yield { data: init, isLast: false };
@@ -183,12 +183,12 @@ export class RecordingDelegate implements CameraRecordingDelegate {
         yield { data: fragment.data, isLast: false };
       }
     } finally {
-      this.#platform.log.debug(`${this.#name}: recording stream ${streamId} ended.`);
+      this.#platform.debug(`${this.#name}: recording stream ${streamId} ended.`);
     }
   }
 
   closeRecordingStream(streamId: number, reason: number | undefined): void {
-    this.#platform.log.debug(
+    this.#platform.debug(
       `${this.#name}: HomeKit closed recording stream ${streamId}` +
         (reason === undefined ? "." : ` (reason ${reason}).`),
     );

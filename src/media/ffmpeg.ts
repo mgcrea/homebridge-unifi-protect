@@ -49,7 +49,7 @@ export class FfmpegProcess {
     this.#platform = options.platform;
 
     const command = options.platform.options.videoProcessor;
-    options.platform.log.debug(`${this.#name}: ${command} ${options.args.join(" ")}`);
+    options.platform.debug(`${this.#name}: ${command} ${options.args.join(" ")}`);
 
     this.#process = spawn(command, options.args, { env: process.env });
 
@@ -114,7 +114,7 @@ export class FfmpegProcess {
     this.#process.kill("SIGTERM");
     const forced = setTimeout(() => {
       if (!this.#ended) {
-        this.#platform.log.debug(`${this.#name}: did not exit on SIGTERM, killing it.`);
+        this.#platform.debug(`${this.#name}: did not exit on SIGTERM, killing it.`);
         this.#process.kill("SIGKILL");
       }
     }, 2000);
@@ -132,7 +132,7 @@ export class FfmpegProcess {
       signal === "SIGTERM" ||
       signal === "SIGKILL"
     ) {
-      this.#platform.log.debug(`${this.#name}: ffmpeg ended (code ${code ?? "none"}).`);
+      this.#platform.debug(`${this.#name}: ffmpeg ended (code ${code ?? "none"}).`);
       return;
     }
 

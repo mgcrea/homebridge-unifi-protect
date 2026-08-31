@@ -75,7 +75,7 @@ export class NvrAccessory extends BaseAccessory<Nvr & { id: string }> {
       !nvrStorage(device).isRecycling && free < 10 ? 1 : 0,
     );
 
-    this.platform.log.debug(
+    this.platform.debug(
       `${this.displayName}: up ${nvrUptimeSeconds(device) ?? "?"}s, ${free}% storage free`,
     );
   }

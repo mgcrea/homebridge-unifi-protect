@@ -210,7 +210,7 @@ export class CameraAccessory extends BaseAccessory<Camera> {
     if (!this.#motionActive) {
       this.#motionActive = true;
       this.#motion.updateCharacteristic(this.platform.Characteristic.MotionDetected, true);
-      this.platform.log.debug(`${this.displayName}: motion`);
+      this.platform.debug(`${this.displayName}: motion`);
     }
 
     this.clearTimer(this.#motionTimer);

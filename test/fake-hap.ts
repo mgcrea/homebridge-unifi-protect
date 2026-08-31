@@ -7,7 +7,7 @@
  * handlers, which is all that is needed to assert what HomeKit would actually
  * show, and deliberately models nothing else.
  */
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 
 import type { UnifiProtectPlatform } from "#platform";
 
@@ -118,18 +118,25 @@ export class FakeHapStatusError extends Error {
   }
 }
 
+/**
+ * Spelling the signature out rather than `ReturnType<typeof vi.fn>` keeps the
+ * mocks callable: the bare form widens to `Procedure | Constructable`, which
+ * reads fine for `.mock.calls` but cannot be invoked.
+ */
+type LogMock = Mock<(message: string, ...rest: unknown[]) => void>;
+
 export type FakeLog = {
-  info: ReturnType<typeof vi.fn>;
-  warn: ReturnType<typeof vi.fn>;
-  error: ReturnType<typeof vi.fn>;
-  debug: ReturnType<typeof vi.fn>;
+  info: LogMock;
+  warn: LogMock;
+  error: LogMock;
+  debug: LogMock;
 };
 
 export const createFakeLog = (): FakeLog => ({
-  info: vi.fn<(message: string) => void>(),
-  warn: vi.fn<(message: string) => void>(),
-  error: vi.fn<(message: string) => void>(),
-  debug: vi.fn<(message: string) => void>(),
+  info: vi.fn<(message: string, ...rest: unknown[]) => void>(),
+  warn: vi.fn<(message: string, ...rest: unknown[]) => void>(),
+  error: vi.fn<(message: string, ...rest: unknown[]) => void>(),
+  debug: vi.fn<(message: string, ...rest: unknown[]) => void>(),
 });
 
 /** A deterministic stand-in for a probed ffmpeg. */
@@ -151,12 +158,18 @@ export const createFakePlatform = (
     codecs?: unknown;
     hasCodecs?: boolean;
   } = {},
-): UnifiProtectPlatform & { log: FakeLog } =>
-  ({
+): UnifiProtectPlatform & { log: FakeLog } => {
+  const log = overrides.log ?? createFakeLog();
+
+  return {
     Service: nameProxy,
     Characteristic: nameProxy,
     api: { hap: { HapStatusError: FakeHapStatusError, CameraController: FakeCameraController } },
-    log: overrides.log ?? createFakeLog(),
+    log,
+    // The platform's own debug channel. In production it promotes to `info`
+    // when the plugin's `debug` option is on; here it lands on the fake
+    // logger's debug, so a spec can assert on it like any other line.
+    debug: (message: string) => log.debug(message),
     isConnected: overrides.isConnected ?? true,
     client: overrides.client ?? {
       patch: vi.fn<(path: string, body: unknown) => Promise<unknown>>(),
@@ -176,4 +189,5 @@ export const createFakePlatform = (
       rtspPort: 7441,
       ...overrides.options,
     },
-  }) as unknown as UnifiProtectPlatform & { log: FakeLog };
+  } as unknown as UnifiProtectPlatform & { log: FakeLog };
+};
