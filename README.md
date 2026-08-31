@@ -267,11 +267,24 @@ Protect reports nothing at all, forever, with no error anywhere.
 pnpm install
 pnpm test            # lint, typecheck, spec, format:check
 pnpm dev:homebridge  # an isolated bridge under ./.homebridge
+pnpm dev:link        # resolve the client from a sibling checkout
 ```
 
 The Protect client lives in a separate package,
-[`@mgcrea/unifi-protect`][client], and is resolved from a sibling checkout
-during development.
+[`@mgcrea/unifi-protect`][client], and is resolved from the registry like any
+other dependency. To work against an unreleased client, `pnpm dev:link` points
+`node_modules` at a sibling `unifi-protect-client` checkout instead. It leaves
+nothing behind in git, and any `pnpm install` undoes it. Build the client before
+testing against it — the plugin resolves its `dist/`, not its `src/`.
+
+The codec specs run `ffmpeg` rather than mocking it, so one has to be on `PATH`
+for `pnpm test` to pass.
+
+## Releasing
+
+`pnpm release` runs the test suite, bumps the version, tags and pushes. The tag
+triggers the publish workflow, which uses npm trusted publishing over OIDC —
+there is no `NPM_TOKEN` to store or rotate.
 
 ## License
 
