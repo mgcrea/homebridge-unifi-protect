@@ -13,6 +13,7 @@ import type {
 import {
   connectProtect,
   EventType,
+  hasPackageCamera,
   isEventInProgress,
   type Camera,
   type Light,
@@ -27,6 +28,7 @@ import type { ProtectDeviceLike } from "#accessories/base-accessory";
 import { CameraAccessory } from "#accessories/camera-accessory";
 import { ChimeAccessory } from "#accessories/chime-accessory";
 import { LightAccessory } from "#accessories/light-accessory";
+import { PackageCameraAccessory } from "#accessories/package-camera-accessory";
 import { NvrAccessory } from "#accessories/nvr-accessory";
 import { SensorAccessory } from "#accessories/sensor-accessory";
 import {
@@ -44,6 +46,7 @@ type AnyAccessory =
   | CameraAccessory
   | ChimeAccessory
   | LightAccessory
+  | PackageCameraAccessory
   | SensorAccessory
   | NvrAccessory;
 
@@ -61,7 +64,13 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
   readonly #cached = new Map<string, PlatformAccessory>();
   readonly #accessories = new Map<string, AnyAccessory>();
   /** Console device id to accessory UUID, so an event can be routed in one hop. */
-  readonly #byDeviceId = new Map<string, string>();
+  /**
+   * Device id to the accessories built from it — plural, because a doorbell
+   * backs both its own accessory and its package camera. Keying one-to-one
+   * would let the second registration overwrite the first and send every
+   * motion event to the wrong one.
+   */
+  readonly #byDeviceId = new Map<string, Set<string>>();
 
   #connection: ProtectConnection | undefined;
   #codecs: CodecSupport | undefined;
@@ -300,6 +309,19 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
             (accessory) => new CameraAccessory(this, accessory, camera),
           ),
         );
+
+        // The doorbell's second lens, as its own accessory: HomeKit has no
+        // concept of one camera with two views.
+        if (hasPackageCamera(camera)) {
+          seen.add(
+            this.#register(
+              camera,
+              "package",
+              (accessory) => new PackageCameraAccessory(this, accessory, camera),
+              `${camera.name ?? camera.id} Package Camera`,
+            ),
+          );
+        }
       }
     }
     if (config.exposeSensors) {
@@ -332,8 +354,7 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
         );
         // A tone added or removed on the console changes the switch set, and
         // the tone library is not a device so no device event announces it.
-        const live = this.#accessoryFor(chime.id);
-        if (live instanceof ChimeAccessory) live.setRingtones(ringtones);
+        this.#accessoryOf(chime.id, ChimeAccessory)?.setRingtones(ringtones);
       }
     }
     if (config.exposeNvr && store.nvr) {
@@ -353,7 +374,8 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
       live?.dispose();
       this.#accessories.delete(uuid);
       for (const [id, mapped] of this.#byDeviceId) {
-        if (mapped === uuid) this.#byDeviceId.delete(id);
+        mapped.delete(uuid);
+        if (mapped.size === 0) this.#byDeviceId.delete(id);
       }
     }
   }
@@ -362,12 +384,15 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
     device: T,
     kind: string,
     build: (accessory: PlatformAccessory) => AnyAccessory,
+    displayName?: string,
   ): string {
     // Seeded from the MAC, which survives a device being removed and re-adopted
     // in Protect; `id` does not, and a re-adopted camera would arrive in
     // HomeKit as a brand new accessory with its automations detached.
     const uuid = this.api.hap.uuid.generate(`${kind}:${normalizeMac(device.mac ?? device.id)}`);
-    this.#byDeviceId.set(device.id, uuid);
+    const mapped = this.#byDeviceId.get(device.id) ?? new Set<string>();
+    mapped.add(uuid);
+    this.#byDeviceId.set(device.id, mapped);
 
     const live = this.#accessories.get(uuid);
     if (live) {
@@ -375,7 +400,7 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
       return uuid;
     }
 
-    const name = device.name ?? device.id;
+    const name = displayName ?? device.name ?? device.id;
     const cached = this.#cached.get(uuid);
     if (cached) {
       cached.displayName = name;
@@ -392,14 +417,28 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
     return uuid;
   }
 
-  #accessoryFor(deviceId: string | null | undefined): AnyAccessory | undefined {
-    if (!deviceId) return undefined;
-    const uuid = this.#byDeviceId.get(deviceId);
-    return uuid ? this.#accessories.get(uuid) : undefined;
+  #accessoriesFor(deviceId: string | null | undefined): AnyAccessory[] {
+    if (!deviceId) return [];
+    const uuids = this.#byDeviceId.get(deviceId);
+    if (!uuids) return [];
+    return [...uuids].flatMap((uuid) => {
+      const accessory = this.#accessories.get(uuid);
+      return accessory ? [accessory] : [];
+    });
+  }
+
+  /** The first accessory of a given kind backed by this device. */
+  #accessoryOf<T extends AnyAccessory>(
+    deviceId: string | null | undefined,
+    kind: abstract new (...args: never[]) => T,
+  ): T | undefined {
+    return this.#accessoriesFor(deviceId).find((a): a is T => a instanceof kind);
   }
 
   #onDeviceChanged(device: { id: string }): void {
-    this.#accessoryFor(device.id)?.update(device as never);
+    // Every accessory the device backs, so a doorbell's package camera sees
+    // the same state change its parent does.
+    for (const accessory of this.#accessoriesFor(device.id)) accessory.update(device as never);
   }
 
   /**
@@ -412,21 +451,31 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
   #onEvent(event: ProtectEvent): void {
     if (!isEventInProgress(event)) return;
 
-    const target = this.#accessoryFor(event.camera ?? event.sensor ?? event.light);
-    if (!target) return;
+    const deviceId = event.camera ?? event.sensor ?? event.light;
+    const targets = this.#accessoriesFor(deviceId);
+    if (targets.length === 0) return;
 
     switch (event.type) {
       case EventType.MOTION:
       case EventType.SMART_DETECT:
       case EventType.SMART_DETECT_LINE:
       case EventType.SENSOR_MOTION:
-        if (target instanceof CameraAccessory) target.triggerMotion();
-        else if (target instanceof SensorAccessory) target.triggerMotion();
-        else if (target instanceof LightAccessory) target.triggerMotion();
+        // A package detection belongs to the second lens, which is watching the
+        // doormat; sending it to the doorbell as well would announce a person
+        // at the door every time a parcel is left.
+        if (event.smartDetectTypes.includes("package")) {
+          this.#accessoryOf(deviceId, PackageCameraAccessory)?.triggerMotion();
+          break;
+        }
+        for (const target of targets) {
+          if (target instanceof CameraAccessory) target.triggerMotion();
+          else if (target instanceof SensorAccessory) target.triggerMotion();
+          else if (target instanceof LightAccessory) target.triggerMotion();
+        }
         break;
 
       case EventType.RING:
-        if (target instanceof CameraAccessory) target.triggerRing();
+        this.#accessoryOf(deviceId, CameraAccessory)?.triggerRing();
         break;
 
       default:

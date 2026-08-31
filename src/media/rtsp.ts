@@ -19,8 +19,34 @@ export const isChannelUsable = (channel: CameraChannel): boolean =>
   typeof channel.rtspAlias === "string" &&
   channel.rtspAlias.length > 0;
 
+/**
+ * The channels a camera's main view can be streamed from.
+ *
+ * The package lens is excluded deliberately. On a G4 Doorbell Pro it is the
+ * same 1600x1200 as the High channel but runs at 2fps, so `selectChannel` sees
+ * two equally good candidates and picks whichever comes first — today that is
+ * the real one only because Protect happens to order the array that way. A
+ * viewer who ended up on the package lens would get the main view's resolution
+ * at a two-frames-a-second slideshow, pointed at the doormat.
+ */
 export const usableChannels = (camera: Camera): CameraChannel[] =>
-  camera.channels.filter((channel) => isChannelUsable(channel));
+  camera.channels.filter((channel) => isChannelUsable(channel) && !isPackageChannel(channel));
+
+/** The second lens, which Protect names rather than flagging. */
+export const isPackageChannel = (channel: CameraChannel): boolean =>
+  /package/i.test(channel.name ?? "");
+
+/**
+ * The same camera seen through one lens only.
+ *
+ * Narrowing the record rather than threading a channel through the media stack
+ * means `selectChannel`, `advertisedResolutions`, `rtspUrl` and both delegates
+ * work unchanged — they simply see a camera that has one channel.
+ */
+export const lensView = (camera: Camera, channel: CameraChannel): Camera => ({
+  ...camera,
+  channels: [channel],
+});
 
 /** Channel names as Protect uses them, best quality first. */
 export const CHANNEL_NAMES = ["high", "medium", "low"] as const;

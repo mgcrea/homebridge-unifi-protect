@@ -269,6 +269,72 @@ describe("UnifiProtectPlatform", () => {
     ]);
   });
 
+  it("gives a doorbell's package lens its own accessory", async () => {
+    // HomeKit has no concept of one camera with two views, so the second lens
+    // has to be a separate accessory.
+    protect.reset();
+    protect.store.nvr = NVR;
+    protect.store.cameras = () => [
+      camera({
+        featureFlags: { hasPackageCamera: true, isDoorbell: true },
+        channels: [
+          { id: 0, name: "High", width: 1600, height: 1200, fps: 20, isRtspEnabled: true },
+          {
+            id: 3,
+            name: "Package Camera",
+            width: 1600,
+            height: 1200,
+            fps: 2,
+            isRtspEnabled: true,
+          },
+        ],
+      }),
+    ];
+
+    const { calls, seeds } = await start();
+    const registered = calls.filter((c) => c.op === "register").flatMap((c) => c.names);
+    expect(registered).toEqual(["Front Door", "Front Door Package Camera"]);
+    // Distinct identities, so the two do not collide in HomeKit.
+    expect(seeds).toEqual(["camera:AABBCCDDEEFF", "package:AABBCCDDEEFF"]);
+  });
+
+  it("sends a package detection to the lens watching the doormat, not the doorbell", async () => {
+    // Routing it to both would announce someone at the door every time a
+    // parcel is left.
+    protect.reset();
+    protect.store.nvr = NVR;
+    protect.store.cameras = () => [
+      camera({
+        featureFlags: { hasPackageCamera: true },
+        channels: [
+          { id: 0, name: "High", width: 1600, height: 1200, fps: 20, isRtspEnabled: true },
+          {
+            id: 3,
+            name: "Package Camera",
+            width: 1600,
+            height: 1200,
+            fps: 2,
+            isRtspEnabled: true,
+          },
+        ],
+      }),
+    ];
+    const { registered } = await start();
+
+    protect.captured.store?.["onEvent"]?.({
+      id: "e1",
+      type: "smartDetectZone",
+      camera: "cam-1",
+      start: 1,
+      smartDetectTypes: ["package"],
+    } as never);
+
+    expect(
+      read(registered.get("Front Door Package Camera"), "MotionSensor", "MotionDetected"),
+    ).toBe(true);
+    expect(read(registered.get("Front Door"), "MotionSensor", "MotionDetected")).toBe(false);
+  });
+
   it("routes a motion event to the camera it names", async () => {
     protect.reset();
     protect.store.nvr = NVR;

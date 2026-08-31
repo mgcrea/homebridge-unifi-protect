@@ -8,6 +8,7 @@ import {
   recordingResolutions,
   rtspUrl,
   selectChannel,
+  lensView,
   usableChannels,
 } from "#media/rtsp";
 
@@ -168,5 +169,32 @@ describe("recordingResolutions", () => {
 
     expect(recordingResolutions(camera)).toEqual(advertisedResolutions(camera));
     expect(recordingResolutions(camera).length).toBeGreaterThan(0);
+  });
+});
+
+describe("usableChannels and the package lens", () => {
+  it("keeps the second lens out of the main camera's choices", () => {
+    // On a G4 Doorbell Pro the package lens is the same 1600x1200 as the High
+    // channel but runs at 2fps. Leaving it in the list means selectChannel has
+    // two equally good candidates and the viewer can end up on a slideshow of
+    // the doormat at the main view's resolution.
+    const doorbell = cameraWith([
+      channel({ id: 0, name: "High", width: 1600, height: 1200, fps: 20 }),
+      channel({ id: 3, name: "Package Camera", width: 1600, height: 1200, fps: 2 }),
+    ]);
+
+    expect(usableChannels(doorbell).map((c) => c.id)).toEqual([0]);
+  });
+
+  it("narrows a camera to one lens without touching anything else", () => {
+    const doorbell = cameraWith([
+      channel({ id: 0, name: "High", width: 1600, height: 1200, fps: 20 }),
+      channel({ id: 3, name: "Package Camera", width: 1600, height: 1200, fps: 2 }),
+    ]);
+    const lens = lensView(doorbell, doorbell.channels[1]!);
+
+    expect(lens.channels.map((c) => c.id)).toEqual([3]);
+    expect(lens.name).toBe(doorbell.name);
+    expect(usableChannels(lens)).toEqual([]);
   });
 });
