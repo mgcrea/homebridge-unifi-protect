@@ -52,6 +52,7 @@
     "coverage": "vitest --run --coverage",
     "watch": "vitest",
     "diagnose": "tsx scripts/diagnose.ts",
+    "dev:link": "ln -sfn ../../../unifi-protect-client node_modules/@mgcrea/unifi-protect",
     "dev:homebridge": "homebridge -D -U ./.homebridge -P . --strict-plugin-resolution",
     "test": "pnpm run lint && pnpm run check && pnpm run spec && pnpm run format:check",
     "release": "release-it",
@@ -77,10 +78,5 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   },
-  "packageManager": "pnpm@10.33.2",
-  "pnpm": {
-    "overrides": {
-      "@mgcrea/unifi-protect": "link:../unifi-protect-client"
-    }
-  }
+  "packageManager": "pnpm@10.33.2"
 }
