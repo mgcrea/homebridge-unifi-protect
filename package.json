@@ -1,7 +1,7 @@
 {
   "name": "@mgcrea/homebridge-unifi-protect",
   "displayName": "UniFi Protect",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Homebridge plugin for UniFi Protect cameras, doorbells, sensors and lights, with live streaming and HomeKit Secure Video",
   "author": "Olivier Louvignes <olivier@mgcrea.io>",
   "repository": {
@@ -55,7 +55,8 @@
     "dev:homebridge": "homebridge -D -U ./.homebridge -P . --strict-plugin-resolution",
     "test": "pnpm run lint && pnpm run check && pnpm run spec && pnpm run format:check",
     "release": "release-it",
-    "prepublishOnly": "pnpm run test && pnpm run build"
+    "prepublishOnly": "pnpm run test && pnpm run build",
+    "pack:poc": "tsx scripts/pack-poc.ts"
   },
   "dependencies": {
     "@mgcrea/unifi-protect": "^0.1.0",

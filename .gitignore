@@ -19,3 +19,7 @@ coverage/
 
 # Session and pinned-certificate cache written by scripts/diagnose.ts
 .cache/
+
+# Hand-built tarball for trialling on a real Homebridge host.
+dist-poc/
+poc/
