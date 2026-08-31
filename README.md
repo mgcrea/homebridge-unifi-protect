@@ -23,9 +23,9 @@ UP FloodLights, driven by the console's realtime update stream.
 - **Live video and snapshots** over the console's own RTSPS, sent straight
   through without re-encoding whenever HomeKit asks for a size the camera
   already produces.
-- **HomeKit Secure Video**, with the same copy-don't-re-encode approach: the
-  plugin lines the camera's keyframe interval up with HomeKit's fragment length
-  so recordings can be passed through rather than rebuilt.
+- **HomeKit Secure Video**, with the same copy-don't-re-encode approach, and
+  without writing anything to your console to achieve it — a recording costs
+  about 5% of a CPU core where the camera's own stream can be passed through.
 - **Cameras** — a motion sensor per camera, held on for a configurable window so
   one person walking up a path is one notification rather than a burst.
 - **Doorbells** — a HomeKit doorbell button, so rings can drive automations.
@@ -164,11 +164,17 @@ the copy path matters more here than it does for live viewing: with
 `-codec:v copy` the process is nearly free.
 
 Copying requires fragments to come out the length HomeKit asked for, and ffmpeg
-can only cut a fragment where the camera already placed a keyframe. Protect lets
-that interval be set, so the plugin sets it — asking the camera for keyframes
-every four seconds is much cheaper than spending a CPU core rewriting the stream
-to put them there. If the account is view-only and the write is refused, it
-falls back to re-encoding and says so.
+can only cut a fragment where the camera already placed a keyframe — so the
+camera's keyframe interval has to divide HomeKit's four seconds. Protect's medium
+channels ship at two seconds, which divides four, so the common case copies with
+nothing on the console changed. The high channels ship at five, which does not.
+
+**The plugin does not reconfigure your cameras to fix that.** Protect exposes the
+interval and would let it be written, but a plugin that quietly edits the
+settings of a security system is not one you can audit by reading its config.
+Where the interval does not divide, it re-encodes and says so in the log. That
+costs about 87% of a core against 5% for the copy path — [measured][perf], along
+with everything else.
 
 The plugin does no muxing of its own. ffmpeg's MP4 muxer already emits exactly
 what Secure Video consumes — an `ftyp`/`moov` header followed by `moof`/`mdat`
@@ -193,6 +199,30 @@ What that costs is worth being precise about: no credentials cross the media
 connection. The RTSP alias in the URL is a per-channel bearer token, and the
 media itself is separately encrypted (`enableSrtp`). It is still weaker than the
 API path, and using a host name closes it.
+
+## Performance
+
+Measured on one real installation — an i7-7567U running both this plugin and
+[hjdhjd's][hjdhjd] side by side against the same console and the same 13
+cameras, neither streaming:
+
+| Idle, per plugin | `homebridge-unifi-protect` 8.1.0 | this plugin |
+|---|---|---|
+| CPU consumed over 257 s | 1 m 27 s | **8 s** |
+| Resident memory | 310 MB | **142 MB** |
+
+And the cost of video, same camera, same eight seconds:
+
+| HomeKit asks for | Live stream | Secure Video |
+|---|---|---|
+| a size the camera produces | **2%** of a core (copy) | **5%** of a core (copy) |
+| a size it does not | 166% (transcode) | 163% (transcode) |
+
+The gap between those two rows is the reason the plugin advertises the camera's
+own channel sizes first, and the reason Secure Video advertises *only* those.
+
+[**Full methodology, the reproduction commands, and what these numbers do not
+cover →**][perf]
 
 ## How it maps to HomeKit
 
@@ -249,3 +279,4 @@ MIT
 
 [hjdhjd]: https://github.com/hjdhjd/homebridge-unifi-protect
 [client]: https://github.com/mgcrea/unifi-protect-client
+[perf]: docs/performance.md
