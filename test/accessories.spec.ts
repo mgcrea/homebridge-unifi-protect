@@ -44,6 +44,52 @@ const service = (
 ): FakeService | undefined =>
   subtype ? accessory.getServiceById(type, subtype) : accessory.getService(type);
 
+describe("CameraAccessory ambient light", () => {
+  const build = (over: Record<string, unknown> = {}) => {
+    const accessory = new FakeAccessory();
+    const platform = createFakePlatform();
+    void new CameraAccessory(platform, accessory as never, aCamera(over));
+    return { accessory, platform };
+  };
+
+  it("exposes a light sensor only on hardware that has one", () => {
+    // Every camera reports isDark; only some can measure light. A G3 would
+    // otherwise show a permanently-daylight reading it never took.
+    expect(
+      service(build({ featureFlags: { hasLuxCheck: true } }).accessory, "LightSensor", "light"),
+    ).toBeDefined();
+    expect(service(build({ isDark: true }).accessory, "LightSensor", "light")).toBeUndefined();
+  });
+
+  it("reports darkness as the floor HomeKit accepts", () => {
+    const { accessory } = build({ featureFlags: { hasLuxCheck: true }, isDark: true });
+    expect(service(accessory, "LightSensor", "light")!.read("CurrentAmbientLightLevel")).toBe(
+      0.0001,
+    );
+  });
+
+  it("reports daylight well clear of any threshold worth automating on", () => {
+    const { accessory } = build({ featureFlags: { hasLuxCheck: true }, isDark: false });
+    expect(service(accessory, "LightSensor", "light")!.read("CurrentAmbientLightLevel")).toBe(1000);
+  });
+
+  it("removes the sensor when a camera stops reporting the capability", () => {
+    // Homebridge restores services from its cache, so one left behind after
+    // the hardware changed would sit in the Home app backed by nothing.
+    const accessory = new FakeAccessory();
+    const platform = createFakePlatform();
+    void new CameraAccessory(
+      platform,
+      accessory as never,
+      aCamera({ featureFlags: { hasLuxCheck: true } }),
+    );
+    expect(service(accessory, "LightSensor", "light")).toBeDefined();
+
+    void new CameraAccessory(platform, accessory as never, aCamera());
+    expect(service(accessory, "LightSensor", "light")).toBeUndefined();
+  });
+});
+
 describe("CameraAccessory", () => {
   it("reports No Response until the console has said something", () => {
     // A camera that shows "no motion" because nothing has been read yet is a

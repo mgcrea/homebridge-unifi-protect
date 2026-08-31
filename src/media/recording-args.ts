@@ -50,9 +50,10 @@ export type RecordingRequest = {
  * to match, as it does for live streaming. But the fragments also have to come
  * out the length HomeKit asked for, and with `-codec:v copy` ffmpeg can only
  * cut a fragment at a keyframe the camera already produced — so the camera's
- * keyframe interval has to divide the fragment length. Protect exposes that
- * interval as `idrInterval` and lets it be set, which is what makes copying
- * without anything being changed on the console. See `idrMatches`.
+ * keyframe interval has to divide the fragment length. Protect reports that
+ * interval as `idrInterval`, and the medium channels ship at 2s, which divides
+ * the 4s HomeKit asks for — so the common case copies with nothing changed on
+ * the console. See `idrMatches`.
  */
 export const canCopyRecording = (channel: CameraChannel, request: RecordingRequest): boolean =>
   channel.width === request.width &&

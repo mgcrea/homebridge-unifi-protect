@@ -1,5 +1,11 @@
 import type { CameraController, PlatformAccessory, Service } from "homebridge";
-import { isDoorbell, smartDetectGate, type Camera } from "@mgcrea/unifi-protect";
+import {
+  cameraAmbientLux,
+  hasAmbientLightSensor,
+  isDoorbell,
+  smartDetectGate,
+  type Camera,
+} from "@mgcrea/unifi-protect";
 
 import { BaseAccessory } from "#accessories/base-accessory";
 import {
@@ -28,6 +34,7 @@ import type { UnifiProtectPlatform } from "#platform";
 export class CameraAccessory extends BaseAccessory<Camera> {
   readonly #motion: Service;
   readonly #doorbell: Service | undefined;
+  readonly #lightSensor: Service | undefined;
   readonly #streaming: StreamingDelegate | undefined;
   readonly #recording: RecordingDelegate | undefined;
   readonly #controller: CameraController | undefined;
@@ -75,6 +82,27 @@ export class CameraAccessory extends BaseAccessory<Camera> {
       `${this.displayName} Doorbell`,
     );
 
+    // Only the models with the hardware for it. Protect exposes no lux reading
+    // at all, so this is `isDark` in the clothes of a light sensor — see
+    // `cameraAmbientLux`, which is explicit about the two values being an
+    // encoding rather than a measurement.
+    this.#lightSensor = this.optionalService(
+      hasAmbientLightSensor(device),
+      Service.LightSensor,
+      `${this.displayName} Light`,
+      "light",
+    );
+    this.#lightSensor?.setCharacteristic(
+      Characteristic.ConfiguredName,
+      `${this.displayName} Light`,
+    );
+    this.#lightSensor?.getCharacteristic(Characteristic.CurrentAmbientLightLevel).onGet(() => {
+      const lux = cameraAmbientLux(this.device);
+      this.assertReadable();
+      if (lux === undefined) throw new this.platform.api.hap.HapStatusError(-70402);
+      return lux;
+    });
+
     this.#warnAboutBlockedSmartDetection();
 
     if (platform.options.enableStreaming && platform.hasCodecs) {
@@ -110,9 +138,11 @@ export class CameraAccessory extends BaseAccessory<Camera> {
     const { codecs } = this.platform;
 
     return new this.platform.api.hap.CameraController({
-      // Two is what the HAP specification asks of a camera that is not doing
-      // Secure Video; it is what lets a second device watch at the same time.
-      cameraStreamCount: 2,
+      // Each concurrent viewer costs one ffmpeg — a few percent of a core on
+      // the copy path, a whole one if it has to transcode. Ten is what the
+      // plugin this replaces advertises, and HomeKit rarely opens more than
+      // two or three.
+      cameraStreamCount: 10,
       delegate,
       streamingOptions: {
         supportedCryptoSuites: [SrtpCryptoSuite.AES_CM_128_HMAC_SHA1_80],
@@ -241,6 +271,14 @@ export class CameraAccessory extends BaseAccessory<Camera> {
       this.platform.Characteristic.StatusActive,
       device.isConnected === true,
     );
+
+    const lux = cameraAmbientLux(device);
+    if (this.#lightSensor && lux !== undefined) {
+      this.#lightSensor.updateCharacteristic(
+        this.platform.Characteristic.CurrentAmbientLightLevel,
+        lux,
+      );
+    }
   }
 
   override dispose(): void {
