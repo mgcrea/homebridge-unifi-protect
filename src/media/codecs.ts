@@ -68,18 +68,91 @@ const HARDWARE_ENCODERS: Record<string, string[]> = {
   win32: ["h264_nvenc", "h264_qsv", "h264_amf"],
 };
 
-/** The best available H.264 encoder, falling back to software. */
-export const selectVideoEncoder = (
+/**
+ * Hardware encoders this build lists, best first.
+ *
+ * Listed is not the same as usable, which is the whole reason this returns
+ * candidates rather than an answer. See `verifyEncoder`.
+ */
+export const hardwareCandidates = (
   encoders: ReadonlySet<string>,
   platform: string = process.platform,
-): { encoder: string; hardware: boolean } => {
-  for (const candidate of HARDWARE_ENCODERS[platform] ?? []) {
-    if (encoders.has(candidate)) return { encoder: candidate, hardware: true };
+): string[] => (HARDWARE_ENCODERS[platform] ?? []).filter((name) => encoders.has(name));
+
+/**
+ * The software encoder to fall back to. libx264 is what every distribution
+ * ships; `h264` is the built-in name on a stripped build.
+ */
+export const softwareEncoder = (encoders: ReadonlySet<string>): string =>
+  encoders.has("libx264") ? "libx264" : "h264";
+
+/**
+ * Actually encode a frame with a candidate before trusting it.
+ *
+ * `ffmpeg -encoders` lists what was compiled in, not what this machine can run,
+ * and the gap is not hypothetical. The Homebridge image ships a static ffmpeg
+ * with `h264_v4l2m2m` compiled in; on any x86 host without a `/dev/video*`
+ * device — which is every one of them — it lists happily and then fails at the
+ * first frame with "Could not find a valid device". Choosing on the listing
+ * alone hands every camera an encoder that cannot work, and the failure only
+ * appears when someone opens a stream.
+ *
+ * The same shape of failure applies to the others: NVENC without the driver,
+ * QSV without the render node, VAAPI without permission on it.
+ */
+export const verifyEncoder = async (
+  videoProcessor: string,
+  encoder: string,
+  timeoutMs = 10_000,
+): Promise<boolean> => {
+  try {
+    await run(
+      videoProcessor,
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        // One tiny frame is enough: the failure is at encoder open, not in the
+        // encoding itself.
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=64x64:rate=1",
+        "-frames:v",
+        "1",
+        "-c:v",
+        encoder,
+        "-f",
+        "null",
+        "-",
+      ],
+      { timeout: timeoutMs },
+    );
+    return true;
+  } catch {
+    return false;
   }
-  // libx264 is what every distribution ships; `h264` is the built-in fallback
-  // name on a stripped build.
-  if (encoders.has("libx264")) return { encoder: "libx264", hardware: false };
-  return { encoder: "h264", hardware: false };
+};
+
+/**
+ * Settle on an encoder, trying each hardware candidate for real and falling
+ * back to software when none of them work.
+ */
+export const resolveVideoEncoder = async (
+  videoProcessor: string,
+  encoders: ReadonlySet<string>,
+  logger?: Logger,
+  platform: string = process.platform,
+): Promise<{ encoder: string; hardware: boolean }> => {
+  for (const candidate of hardwareCandidates(encoders, platform)) {
+    if (await verifyEncoder(videoProcessor, candidate)) {
+      return { encoder: candidate, hardware: true };
+    }
+    logger?.debug?.(
+      `${candidate} is compiled into this ffmpeg but will not run on this host; trying the next one.`,
+    );
+  }
+  return { encoder: softwareEncoder(encoders), hardware: false };
 };
 
 /**
@@ -111,7 +184,7 @@ export const probeCodecs = async (
 
   const encoders = parseCodecList(encoderList);
   const decoders = parseCodecList(decoderList);
-  const { encoder, hardware } = selectVideoEncoder(encoders);
+  const { encoder, hardware } = await resolveVideoEncoder(videoProcessor, encoders, logger);
   const audioEncoder = selectAudioEncoder(encoders);
 
   logger?.info?.(

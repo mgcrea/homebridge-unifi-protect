@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  hardwareCandidates,
   parseCodecList,
   parseVersion,
+  resolveVideoEncoder,
   selectAudioEncoder,
-  selectVideoEncoder,
+  softwareEncoder,
+  verifyEncoder,
 } from "#media/codecs";
 
 /** A trimmed but otherwise verbatim `ffmpeg -encoders` listing. */
@@ -46,41 +49,67 @@ describe("parseVersion", () => {
   });
 });
 
-describe("selectVideoEncoder", () => {
-  it("uses VideoToolbox on a Mac", () => {
-    const encoders = parseCodecList(ENCODERS);
-    expect(selectVideoEncoder(encoders, "darwin")).toEqual({
-      encoder: "h264_videotoolbox",
-      hardware: true,
-    });
+describe("hardwareCandidates", () => {
+  it("offers VideoToolbox on a Mac", () => {
+    expect(hardwareCandidates(parseCodecList(ENCODERS), "darwin")).toEqual(["h264_videotoolbox"]);
   });
 
-  it("prefers a discrete GPU over the Pi's encoder on Linux", () => {
-    // v4l2m2m also shows up on desktop kernels, where it is slow — so a box
-    // with NVENC must not end up on it.
+  it("puts a discrete GPU ahead of the Pi's encoder on Linux", () => {
+    // v4l2m2m also shows up on desktop kernels, where it is slow or absent — so
+    // a box with NVENC must not end up on it.
     const encoders = new Set(["h264_v4l2m2m", "h264_nvenc", "libx264"]);
-    expect(selectVideoEncoder(encoders, "linux").encoder).toBe("h264_nvenc");
+    expect(hardwareCandidates(encoders, "linux")).toEqual(["h264_nvenc", "h264_v4l2m2m"]);
   });
 
-  it("uses the Pi's encoder when that is all there is", () => {
+  it("offers nothing on a build with no hardware encoder compiled in", () => {
+    expect(hardwareCandidates(new Set(["libx264"]), "linux")).toEqual([]);
+  });
+});
+
+describe("softwareEncoder", () => {
+  it("prefers libx264", () => {
+    expect(softwareEncoder(new Set(["libx264"]))).toBe("libx264");
+  });
+
+  it("still names an encoder on a stripped build", () => {
+    expect(softwareEncoder(new Set())).toBe("h264");
+  });
+});
+
+describe("verifyEncoder", () => {
+  it("rejects an encoder that is listed but cannot run", async () => {
+    // The case this exists for: the Homebridge image ships a static ffmpeg with
+    // h264_v4l2m2m compiled in, and on any x86 host — no /dev/video* — it opens
+    // with "Could not find a valid device". Verified against that exact build.
+    expect(await verifyEncoder("ffmpeg", "h264_v4l2m2m")).toBe(false);
+  });
+
+  it("accepts one that does run", async () => {
+    expect(await verifyEncoder("ffmpeg", "libx264")).toBe(true);
+  });
+
+  it("reports false rather than throwing when ffmpeg is missing entirely", async () => {
+    expect(await verifyEncoder("definitely-not-ffmpeg", "libx264")).toBe(false);
+  });
+});
+
+describe("resolveVideoEncoder", () => {
+  it("falls back to software when the listed hardware encoder will not run", async () => {
+    // Choosing on the listing alone hands every camera an encoder that cannot
+    // work, and the failure only shows up when somebody opens a stream.
     const encoders = new Set(["h264_v4l2m2m", "libx264"]);
-    expect(selectVideoEncoder(encoders, "linux")).toEqual({
-      encoder: "h264_v4l2m2m",
-      hardware: true,
-    });
-  });
-
-  it("falls back to software, and says so", () => {
-    // The flag is what decides whether preset flags are passed; a hardware
-    // encoder rejects them outright.
-    expect(selectVideoEncoder(new Set(["libx264"]), "linux")).toEqual({
+    expect(await resolveVideoEncoder("ffmpeg", encoders, undefined, "linux")).toEqual({
       encoder: "libx264",
       hardware: false,
     });
   });
 
-  it("still names an encoder on a build with neither", () => {
-    expect(selectVideoEncoder(new Set(), "linux").encoder).toBe("h264");
+  it("uses a hardware encoder that does run", async () => {
+    const encoders = new Set(["h264_videotoolbox", "libx264"]);
+    const resolved = await resolveVideoEncoder("ffmpeg", encoders, undefined, "darwin");
+    // Only assert the hardware flag agrees with the encoder chosen; which one
+    // is available depends on the machine the suite runs on.
+    expect(resolved.hardware).toBe(resolved.encoder !== "libx264");
   });
 });
 
