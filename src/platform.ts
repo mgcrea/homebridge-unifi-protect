@@ -195,7 +195,9 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
     this.log.info(
       `Connected to ${nvr?.name ?? config.host} running Protect ${nvr?.version ?? "(unknown)"}.`,
     );
-    if (this.#connection.fingerprint) {
+    // Only worth saying when the trust was learned rather than declared —
+    // repeating it at someone who already set the value is noise.
+    if (this.#connection.fingerprint && !config.fingerprint) {
       this.log.info(
         `Console certificate fingerprint: ${this.#connection.fingerprint}. ` +
           `Set it as \`fingerprint\` in the plugin config to make the trust explicit.`,
