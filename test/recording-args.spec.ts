@@ -4,9 +4,7 @@ import { AudioRecordingCodec, H264Level, H264Profile } from "#media/hap";
 import {
   canCopyRecording,
   containerArgs,
-  desiredIdrInterval,
   idrMatches,
-  needsIdrAlignment,
   recordingArgs,
   recordingAudioArgs,
   recordingVideoArgs,
@@ -47,47 +45,26 @@ const valueOf = (args: string[], flag: string): string | undefined => {
 };
 
 describe("idrMatches", () => {
-  it("accepts a keyframe interval equal to the fragment length", () => {
-    // With `-codec:v copy` ffmpeg can only cut a fragment where the camera
-    // already put a keyframe, so this is what decides copy versus re-encode.
+  it("accepts an interval that divides the fragment length", () => {
+    // A 2s interval puts a keyframe at 0s, 2s, 4s… so every 4s boundary is one.
+    // Measured: a 2s source with -min_frag_duration yields exactly 4.00s
+    // fragments. This is why Protect's stock medium channels record by copying
+    // with nothing changed on the console.
     expect(idrMatches(channel({ idrInterval: 4 }), request)).toBe(true);
+    expect(idrMatches(channel({ idrInterval: 2 }), request)).toBe(true);
+    expect(idrMatches(channel({ idrInterval: 1 }), request)).toBe(true);
   });
 
-  it("rejects an interval that merely divides the fragment length", () => {
-    // The trap, measured on a real G4 Bullet: `frag_keyframe` cuts at EVERY
-    // keyframe, so a 2s interval yields 2s fragments even though
-    // `-frag_duration` asked for 4s. Seven fragments arrived where four were
-    // negotiated. Divisibility looks right and delivers a length HomeKit never
-    // agreed to.
-    expect(idrMatches(channel({ idrInterval: 2 }), request)).toBe(false);
-    expect(idrMatches(channel({ idrInterval: 1 }), request)).toBe(false);
-  });
-
-  it("rejects one longer than the fragment", () => {
+  it("rejects one that does not divide it", () => {
+    // Measured: a 5s source yields 5.00s fragments where 4s was negotiated, so
+    // that channel has to be re-encoded rather than copied.
     expect(idrMatches(channel({ idrInterval: 5 }), request)).toBe(false);
+    expect(idrMatches(channel({ idrInterval: 3 }), request)).toBe(false);
   });
 
   it("rejects a camera that reports no interval at all", () => {
     expect(idrMatches(channel({ idrInterval: undefined }), request)).toBe(false);
     expect(idrMatches(channel({ idrInterval: 0 }), request)).toBe(false);
-  });
-});
-
-describe("desiredIdrInterval", () => {
-  it("asks the camera for keyframes at the fragment length", () => {
-    expect(desiredIdrInterval(request)).toBe(4);
-    expect(desiredIdrInterval({ ...request, fragmentLengthMs: 2000 })).toBe(2);
-  });
-
-  it("never asks for zero, which the console would reject", () => {
-    expect(desiredIdrInterval({ ...request, fragmentLengthMs: 200 })).toBe(1);
-  });
-});
-
-describe("needsIdrAlignment", () => {
-  it("is what triggers the one write that makes copying possible", () => {
-    expect(needsIdrAlignment(channel({ idrInterval: 4 }), request)).toBe(false);
-    expect(needsIdrAlignment(channel({ idrInterval: 5 }), request)).toBe(true);
   });
 });
 
@@ -104,6 +81,12 @@ describe("canCopyRecording", () => {
     // The trap: the picture is the right size, so a size-only check would copy
     // and hand HomeKit fragments of a length it never asked for.
     expect(canCopyRecording(channel({ idrInterval: 5 }), request)).toBe(false);
+  });
+
+  it("copies a stock Protect medium channel without anything being changed", () => {
+    // The case that matters in practice: 2s is what Protect ships, and it
+    // divides the 4s HomeKit asks for.
+    expect(canCopyRecording(channel({ idrInterval: 2 }), request)).toBe(true);
   });
 });
 
@@ -128,8 +111,14 @@ describe("containerArgs", () => {
     expect(valueOf(containerArgs(request), "-movflags")).toContain("skip_trailer");
   });
 
-  it("states the fragment duration in microseconds", () => {
-    expect(valueOf(containerArgs(request), "-frag_duration")).toBe("4000000");
+  it("sets a MINIMUM fragment duration, not a target", () => {
+    // The distinction decides whether the plugin has to reconfigure somebody's
+    // cameras. `frag_keyframe` alone cuts at every keyframe, so a 2s camera
+    // gives 2s fragments however long a `-frag_duration` asks for;
+    // `-min_frag_duration` cuts at the first keyframe at or after the target and
+    // turns the same camera into exact 4.00s fragments.
+    expect(valueOf(containerArgs(request), "-min_frag_duration")).toBe("4000000");
+    expect(containerArgs(request)).not.toContain("-frag_duration");
   });
 
   it("writes to stdout", () => {

@@ -52,7 +52,7 @@ export type RecordingRequest = {
  * cut a fragment at a keyframe the camera already produced — so the camera's
  * keyframe interval has to divide the fragment length. Protect exposes that
  * interval as `idrInterval` and lets it be set, which is what makes copying
- * achievable rather than lucky. See `needsIdrAlignment`.
+ * without anything being changed on the console. See `idrMatches`.
  */
 export const canCopyRecording = (channel: CameraChannel, request: RecordingRequest): boolean =>
   channel.width === request.width &&
@@ -60,14 +60,17 @@ export const canCopyRecording = (channel: CameraChannel, request: RecordingReque
   idrMatches(channel, request);
 
 /**
- * Whether the camera's keyframes fall exactly on HomeKit's fragment boundaries.
+ * Whether the camera's keyframes land on HomeKit's fragment boundaries.
  *
- * **Equality, not divisibility.** `frag_keyframe` makes ffmpeg cut a fragment at
- * *every* keyframe, so a camera with a 2s interval produces 2s fragments even
- * when `-frag_duration` asks for 4s — measured against a real G4 Bullet, whose
- * medium channel ships at 2s and yielded seven fragments where four were
- * negotiated. Divisibility looks like the right test and quietly delivers
- * fragments of a length HomeKit never agreed to.
+ * Divisibility, not equality: a 2s interval puts a keyframe at 0s, 2s, 4s… so
+ * every 4s boundary is one. What makes that work is `-min_frag_duration`, which
+ * tells ffmpeg to cut at the first keyframe *at or after* the target rather than
+ * at every keyframe — see `containerArgs`. Measured: a 2s source yields exactly
+ * 4.00s fragments, a 5s source yields 5.00s ones and so has to be re-encoded.
+ *
+ * This is why the plugin never reconfigures a camera. Protect's medium channels
+ * ship at 2s, which divides the 4s HomeKit asks for, so the common case records
+ * by copying with nothing on the console changed.
  *
  * Protect states `idrInterval` in seconds; HomeKit states fragments in
  * milliseconds.
@@ -75,15 +78,8 @@ export const canCopyRecording = (channel: CameraChannel, request: RecordingReque
 export const idrMatches = (channel: CameraChannel, request: RecordingRequest): boolean => {
   const idrMs = (channel.idrInterval ?? 0) * 1000;
   if (idrMs <= 0) return false;
-  return idrMs === request.fragmentLengthMs;
+  return request.fragmentLengthMs % idrMs === 0;
 };
-
-/** The `idrInterval`, in seconds, a channel needs for fragments to come out right. */
-export const desiredIdrInterval = (request: RecordingRequest): number =>
-  Math.max(1, Math.round(request.fragmentLengthMs / 1000));
-
-export const needsIdrAlignment = (channel: CameraChannel, request: RecordingRequest): boolean =>
-  !idrMatches(channel, request);
 
 /**
  * The three flags that turn ffmpeg's mp4 muxer into an HKSV source.
@@ -101,6 +97,15 @@ export const needsIdrAlignment = (channel: CameraChannel, request: RecordingRequ
  *
  * `skip_trailer` suppresses the `mfra` index ffmpeg would otherwise append,
  * which is meaningless in a stream that never ends.
+ *
+ * The fragment length is set with **`-min_frag_duration`**, not `-frag_duration`.
+ * The difference decides whether the plugin has to reconfigure the camera.
+ * `frag_keyframe` alone cuts at *every* keyframe, so a 2s camera yields 2s
+ * fragments however long a `-frag_duration` is asked for; `-min_frag_duration`
+ * cuts at the first keyframe at or after the target, turning the same 2s camera
+ * into exact 4.00s fragments. With the wrong one of the two, the only way to get
+ * the negotiated length by copying is to change the camera's keyframe interval —
+ * which is somebody's security system, not ours to reconfigure.
  */
 export const containerArgs = (request: RecordingRequest): string[] => [
   "-f",
@@ -108,7 +113,7 @@ export const containerArgs = (request: RecordingRequest): string[] => [
   "-movflags",
   "frag_keyframe+empty_moov+default_base_moof+skip_trailer",
   // ffmpeg counts fragment duration in microseconds.
-  "-frag_duration",
+  "-min_frag_duration",
   String(request.fragmentLengthMs * 1000),
   "pipe:1",
 ];

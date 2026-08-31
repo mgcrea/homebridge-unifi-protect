@@ -5,16 +5,9 @@ import type {
 } from "homebridge";
 import type { Camera, CameraChannel } from "@mgcrea/unifi-protect";
 
-import {
-  canCopyRecording,
-  desiredIdrInterval,
-  needsIdrAlignment,
-  recordingArgs,
-  type RecordingRequest,
-} from "#media/recording-args";
-import { alignIdrInterval, selectChannel, usableChannels } from "#media/rtsp";
+import { canCopyRecording, recordingArgs, type RecordingRequest } from "#media/recording-args";
+import { selectChannel, usableChannels } from "#media/rtsp";
 import { Prebuffer } from "#media/prebuffer";
-import { describe } from "#util/describe";
 import type { InputOptions } from "#media/stream-args";
 import type { UnifiProtectPlatform } from "#platform";
 
@@ -125,31 +118,7 @@ export class RecordingDelegate implements CameraRecordingDelegate {
       return;
     }
 
-    // Line the camera's keyframe interval up with HomeKit's fragment length.
-    // This is what lets the video be copied instead of re-encoded: with
-    // `-codec:v copy` ffmpeg can only cut a fragment where the camera already
-    // put a keyframe, so without this the fragments come out whatever length
-    // the camera happened to choose.
-    if (needsIdrAlignment(channel, request)) {
-      const seconds = desiredIdrInterval(request);
-      try {
-        await alignIdrInterval(this.#platform.client, camera, channel.id, seconds);
-        this.#platform.log.info(
-          `${this.#name}: set the "${channel.name ?? channel.id}" channel's keyframe interval to ` +
-            `${seconds}s so recordings can be copied rather than re-encoded.`,
-        );
-      } catch (error) {
-        // Not fatal: the transcode path still produces correct fragments, it
-        // just costs a core while recording.
-        this.#platform.log.debug(
-          `${this.#name}: could not align the keyframe interval (${describe(error)}); ` +
-            `recordings will be re-encoded instead.`,
-        );
-      }
-    }
-
-    // Re-read the channel: aligning it above changed the record we are holding.
-    const current = selectChannel(usableChannels(this.#camera()), request) ?? channel;
+    const current = channel;
     const copying = canCopyRecording(current, request);
 
     this.#platform.log.info(
