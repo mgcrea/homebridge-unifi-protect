@@ -140,3 +140,25 @@ export const advertisedResolutions = (camera: Camera): [number, number, number][
     return true;
   });
 };
+
+/**
+ * The resolutions to offer HomeKit for RECORDING.
+ *
+ * The camera's own channel sizes and nothing else — deliberately narrower than
+ * what live streaming advertises. Streaming can afford the standard fallback
+ * list because a transcode there lasts only as long as somebody is watching; a
+ * Secure Video prebuffer runs for as long as recording is armed, so a size no
+ * channel provides buys a permanently re-encoding ffmpeg. Measured on one
+ * 2688x1512 camera asked for 1080p: 152% of a core, against low single digits
+ * when the stream can be copied.
+ *
+ * A camera reporting no usable channel dimensions has nothing to copy anyway,
+ * so it falls back to what streaming would offer rather than advertising an
+ * empty list, which HAP rejects outright.
+ */
+export const recordingResolutions = (camera: Camera): [number, number, number][] => {
+  const native = advertisedResolutions(camera).filter(([width, height]) =>
+    camera.channels.some((channel) => channel.width === width && channel.height === height),
+  );
+  return native.length > 0 ? native : advertisedResolutions(camera);
+};

@@ -5,6 +5,7 @@ import {
   advertisedResolutions,
   isChannelUsable,
   namedChannel,
+  recordingResolutions,
   rtspUrl,
   selectChannel,
   usableChannels,
@@ -130,5 +131,42 @@ describe("advertisedResolutions", () => {
   it("caps the frame rate at what HomeKit will accept", () => {
     const camera = cameraWith([channel({ width: 1920, height: 1080, fps: 60, rtspAlias: "a" })]);
     expect(advertisedResolutions(camera)[0]).toEqual([1920, 1080, 30]);
+  });
+});
+
+describe("recordingResolutions", () => {
+  it("offers only sizes a channel actually provides", () => {
+    // The failure this exists for: a camera whose channels are 2688x1512,
+    // 1280x720 and 640x360 was offered 1920x1080 from the standard list,
+    // HomeKit chose it, and the prebuffer re-encoded at 152% of a core for as
+    // long as Secure Video stayed armed.
+    const camera = cameraWith([
+      channel({ id: 0, width: 2688, height: 1512 }),
+      channel({ id: 1, width: 1280, height: 720 }),
+      channel({ id: 2, width: 640, height: 360 }),
+    ]);
+
+    expect(recordingResolutions(camera)).toEqual([
+      [2688, 1512, 30],
+      [1280, 720, 30],
+      [640, 360, 30],
+    ]);
+  });
+
+  it("never offers a standard size the camera cannot produce", () => {
+    const camera = cameraWith([channel({ id: 0, width: 2688, height: 1512 })]);
+    const keys = recordingResolutions(camera).map(([w, h]) => `${w}x${h}`);
+
+    expect(keys).not.toContain("1920x1080");
+    expect(keys).not.toContain("320x180");
+  });
+
+  it("falls back to the streaming list when a camera reports no sizes", () => {
+    // An empty resolution list is rejected by HAP outright, and a camera with
+    // no readable channel has nothing to copy anyway.
+    const camera = cameraWith([channel({ id: 0, width: undefined, height: undefined })]);
+
+    expect(recordingResolutions(camera)).toEqual(advertisedResolutions(camera));
+    expect(recordingResolutions(camera).length).toBeGreaterThan(0);
   });
 });

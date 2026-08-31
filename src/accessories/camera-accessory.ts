@@ -13,7 +13,7 @@ import {
   SrtpCryptoSuite,
 } from "#media/hap";
 import { RecordingDelegate } from "#media/recording-delegate";
-import { advertisedResolutions } from "#media/rtsp";
+import { advertisedResolutions, recordingResolutions } from "#media/rtsp";
 import { StreamingDelegate } from "#media/streaming-delegate";
 import type { UnifiProtectPlatform } from "#platform";
 
@@ -158,7 +158,10 @@ export class CameraAccessory extends BaseAccessory<Camera> {
                     profiles: [H264Profile.BASELINE, H264Profile.MAIN, H264Profile.HIGH],
                     levels: [H264Level.LEVEL3_1, H264Level.LEVEL3_2, H264Level.LEVEL4_0],
                   },
-                  resolutions: advertisedResolutions(this.device),
+                  // Native sizes only. See `recordingResolutions`: a prebuffer
+                  // runs for as long as recording is armed, so a size no
+                  // channel provides costs a permanently re-encoding ffmpeg.
+                  resolutions: recordingResolutions(this.device),
                 },
                 audio: {
                   codecs: [
