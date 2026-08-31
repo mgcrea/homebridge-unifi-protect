@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { RtpSplitter } from "#media/rtp/splitter";
 import { eldConfig, talkbackArgs, talkbackSdp } from "#media/talkback-args";
+import { hasTwoWayAudio, talkbackTarget, zCamera } from "@mgcrea/unifi-protect";
 
 const STREAM = {
   localPort: 5000,
@@ -165,5 +166,39 @@ describe("RtpSplitter", () => {
     const splitter = await RtpSplitter.bind(0);
     splitter.close();
     expect(() => splitter.close()).not.toThrow();
+  });
+});
+
+describe("who gets a talkback leg", () => {
+  it("is decided by the speaker flag, not by talkbackSettings alone", () => {
+    // Every camera carries talkbackSettings, speaker or not — a UVC G3 reports
+    // typeIn "serverudp" and a bindPort exactly like a G4 Instant does. Reading
+    // only those put a splitter on the audio port of every camera in the house,
+    // moved the outgoing audio to a different local port, and killed the live
+    // stream two seconds in on cameras that never did two-way audio.
+    const SETTINGS = { typeFmt: "aac", typeIn: "serverudp", bindPort: 7004, samplingRate: 22050 };
+
+    const speaker = zCamera.parse({
+      id: "a",
+      modelKey: "camera",
+      mac: "AA",
+      host: "192.168.6.27",
+      featureFlags: { hasSpeaker: true },
+      talkbackSettings: SETTINGS,
+    });
+    const noSpeaker = zCamera.parse({
+      id: "b",
+      modelKey: "camera",
+      mac: "BB",
+      host: "192.168.6.92",
+      featureFlags: { hasSpeaker: false },
+      talkbackSettings: SETTINGS,
+    });
+
+    // talkbackTarget answers "where would it go", which is not the same
+    // question as "does anything there play it".
+    expect(talkbackTarget(noSpeaker)).toBeDefined();
+    expect(hasTwoWayAudio(noSpeaker)).toBe(false);
+    expect(hasTwoWayAudio(speaker)).toBe(true);
   });
 });

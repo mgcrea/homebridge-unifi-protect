@@ -8,7 +8,12 @@ import type {
   StreamingRequest,
   StreamRequestCallback,
 } from "homebridge";
-import { talkbackTarget, type Camera, type CameraChannel } from "@mgcrea/unifi-protect";
+import {
+  hasTwoWayAudio,
+  talkbackTarget,
+  type Camera,
+  type CameraChannel,
+} from "@mgcrea/unifi-protect";
 
 import { enableRtsp, namedChannel, rtspUrl, selectChannel, usableChannels } from "#media/rtsp";
 
@@ -67,6 +72,18 @@ export class StreamingDelegate implements CameraStreamingDelegate {
 
   get #name(): string {
     return this.#camera().name ?? this.#camera().id;
+  }
+
+  /**
+   * Where this camera accepts talkback, if it accepts any at all.
+   *
+   * Both the capability flag and the settings have to agree. `talkbackSettings`
+   * is populated on every camera including those with no speaker, so it says
+   * where audio would go rather than whether anything would play it.
+   */
+  #talkbackTarget(): ReturnType<typeof talkbackTarget> {
+    const camera = this.#camera();
+    return hasTwoWayAudio(camera) ? talkbackTarget(camera) : undefined;
   }
 
   /** How ffmpeg reaches the console's RTSPS. Shared with the recording delegate. */
@@ -157,7 +174,12 @@ export class StreamingDelegate implements CameraStreamingDelegate {
         // Two-way audio changes who owns the audio port. HomeKit sends its
         // voice to the same port it expects ours to arrive from, so the
         // splitter binds it and the outgoing ffmpeg gets one of its own.
-        const target = talkbackTarget(this.#camera());
+        //
+        // Gated on the same capability the accessory advertises, not on
+        // talkbackSettings alone: every camera carries those settings,
+        // speaker or not. Rearranging the audio ports for a camera HomeKit
+        // never negotiated two-way audio with kills the stream outright.
+        const target = this.#talkbackTarget();
         let talkback: PreparedSession["talkback"];
         if (target && this.#platform.codecs.audioEncoder) {
           const [outgoingPort, incomingPort] = await Promise.all([
@@ -347,7 +369,7 @@ export class StreamingDelegate implements CameraStreamingDelegate {
     request: Extract<StreamingRequest, { type: typeof StreamRequestType.START }>,
   ): void {
     const talkback = session.talkback;
-    const target = talkbackTarget(this.#camera());
+    const target = this.#talkbackTarget();
     const encoder = this.#platform.codecs.audioEncoder;
     if (!talkback || !target || !encoder) return;
 
