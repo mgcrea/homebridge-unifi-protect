@@ -52,6 +52,13 @@ jobs:
           fi
           echo "Publishing version $pkg"
 
+      # The codec specs run ffmpeg for real — verifyEncoder's whole job is to
+      # find out whether an encoder actually starts, which cannot be faked. The
+      # runners ship no ffmpeg, so without this the specs pass for the wrong
+      # reason: every probe returns false, including the ones asserting true.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - run: pnpm run lint
       - run: pnpm run check
       - run: pnpm run format:check
