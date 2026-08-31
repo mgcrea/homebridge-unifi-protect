@@ -59,11 +59,23 @@ export const canCopyRecording = (channel: CameraChannel, request: RecordingReque
   channel.height === request.height &&
   idrMatches(channel, request);
 
-/** Protect states `idrInterval` in seconds; HomeKit states fragments in milliseconds. */
+/**
+ * Whether the camera's keyframes fall exactly on HomeKit's fragment boundaries.
+ *
+ * **Equality, not divisibility.** `frag_keyframe` makes ffmpeg cut a fragment at
+ * *every* keyframe, so a camera with a 2s interval produces 2s fragments even
+ * when `-frag_duration` asks for 4s — measured against a real G4 Bullet, whose
+ * medium channel ships at 2s and yielded seven fragments where four were
+ * negotiated. Divisibility looks like the right test and quietly delivers
+ * fragments of a length HomeKit never agreed to.
+ *
+ * Protect states `idrInterval` in seconds; HomeKit states fragments in
+ * milliseconds.
+ */
 export const idrMatches = (channel: CameraChannel, request: RecordingRequest): boolean => {
   const idrMs = (channel.idrInterval ?? 0) * 1000;
   if (idrMs <= 0) return false;
-  return request.fragmentLengthMs % idrMs === 0;
+  return idrMs === request.fragmentLengthMs;
 };
 
 /** The `idrInterval`, in seconds, a channel needs for fragments to come out right. */

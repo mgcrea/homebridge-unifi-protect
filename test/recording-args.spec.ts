@@ -47,16 +47,23 @@ const valueOf = (args: string[], flag: string): string | undefined => {
 };
 
 describe("idrMatches", () => {
-  it("accepts a keyframe interval that divides the fragment length", () => {
+  it("accepts a keyframe interval equal to the fragment length", () => {
     // With `-codec:v copy` ffmpeg can only cut a fragment where the camera
     // already put a keyframe, so this is what decides copy versus re-encode.
     expect(idrMatches(channel({ idrInterval: 4 }), request)).toBe(true);
-    expect(idrMatches(channel({ idrInterval: 2 }), request)).toBe(true);
-    expect(idrMatches(channel({ idrInterval: 1 }), request)).toBe(true);
   });
 
-  it("rejects one that does not divide it", () => {
-    expect(idrMatches(channel({ idrInterval: 3 }), request)).toBe(false);
+  it("rejects an interval that merely divides the fragment length", () => {
+    // The trap, measured on a real G4 Bullet: `frag_keyframe` cuts at EVERY
+    // keyframe, so a 2s interval yields 2s fragments even though
+    // `-frag_duration` asked for 4s. Seven fragments arrived where four were
+    // negotiated. Divisibility looks right and delivers a length HomeKit never
+    // agreed to.
+    expect(idrMatches(channel({ idrInterval: 2 }), request)).toBe(false);
+    expect(idrMatches(channel({ idrInterval: 1 }), request)).toBe(false);
+  });
+
+  it("rejects one longer than the fragment", () => {
     expect(idrMatches(channel({ idrInterval: 5 }), request)).toBe(false);
   });
 
