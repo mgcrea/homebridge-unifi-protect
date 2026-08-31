@@ -22,6 +22,8 @@ const protect = vi.hoisted(() => {
     cameras: () => [] as unknown[],
     sensors: () => [] as unknown[],
     lights: () => [] as unknown[],
+    chimes: () => [] as unknown[],
+    ringtones: () => [] as unknown[],
   };
   const captured: { store?: Record<string, (...args: never[]) => void> | undefined } = {};
   return {
@@ -46,6 +48,8 @@ const protect = vi.hoisted(() => {
       store.cameras = () => [];
       store.sensors = () => [];
       store.lights = () => [];
+      store.chimes = () => [];
+      store.ringtones = () => [];
       captured.store = undefined;
       protectMockReset();
     },
@@ -196,6 +200,21 @@ describe("UnifiProtectPlatform", () => {
     const { calls } = await start();
     const registered = calls.filter((c) => c.op === "register").flatMap((c) => c.names);
     expect(registered).toEqual(["Front Door", "Back Door"]);
+  });
+
+  it("registers a chime with a switch for every tone the console holds", async () => {
+    protect.reset();
+    protect.store.nvr = NVR;
+    protect.store.chimes = () => [
+      parseBootstrap({
+        nvr: NVR,
+        chimes: [{ id: "chime-1", modelKey: "chime", mac: "F4E2C60CFAE3", name: "Chime" }],
+      }).chimes[0]!,
+    ];
+    protect.store.ringtones = () => [{ id: "t1", name: "Default" }];
+
+    const { calls } = await start();
+    expect(calls.filter((c) => c.op === "register").flatMap((c) => c.names)).toContain("Chime");
   });
 
   it("leaves the console's own diagnostics out unless asked for", async () => {

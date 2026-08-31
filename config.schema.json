@@ -71,6 +71,12 @@
         "default": true,
         "description": "Adds a dimmable light and its built-in motion sensor."
       },
+      "exposeChimes": {
+        "title": "Expose UP Chimes",
+        "type": "boolean",
+        "default": true,
+        "description": "Adds a switch per ringtone for each UP Chime. Selecting one writes the choice back to the console, which is the only way to offer the control."
+      },
       "exposeNvr": {
         "title": "Expose console diagnostics",
         "type": "boolean",
@@ -196,6 +202,7 @@
         "exposeCameras",
         "exposeSensors",
         "exposeLights",
+        "exposeChimes",
         "exposeNvr",
         "motionDuration"
       ]

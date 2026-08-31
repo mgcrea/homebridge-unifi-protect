@@ -43,6 +43,7 @@ const zConfig = z.looseObject({
   exposeCameras: z.boolean().optional(),
   exposeSensors: z.boolean().optional(),
   exposeLights: z.boolean().optional(),
+  exposeChimes: z.boolean().optional(),
   exposeNvr: z.boolean().optional(),
 
   motionDuration: z.number().optional(),
@@ -73,6 +74,7 @@ export type UnifiProtectConfig = {
   exposeCameras: boolean;
   exposeSensors: boolean;
   exposeLights: boolean;
+  exposeChimes: boolean;
   exposeNvr: boolean;
   motionDurationMs: number;
   cameras: CameraOverride[];
@@ -126,6 +128,7 @@ export const parseConfig = (config: PlatformConfig): UnifiProtectConfig => {
     exposeCameras: raw.exposeCameras ?? true,
     exposeSensors: raw.exposeSensors ?? true,
     exposeLights: raw.exposeLights ?? true,
+    exposeChimes: raw.exposeChimes ?? true,
     // The NVR's own sensors are diagnostics, not home automation, so they are
     // opt-in — they would otherwise clutter the Home app for everyone.
     exposeNvr: raw.exposeNvr ?? false,

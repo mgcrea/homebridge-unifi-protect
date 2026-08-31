@@ -25,6 +25,7 @@ import {
 
 import type { ProtectDeviceLike } from "#accessories/base-accessory";
 import { CameraAccessory } from "#accessories/camera-accessory";
+import { ChimeAccessory } from "#accessories/chime-accessory";
 import { LightAccessory } from "#accessories/light-accessory";
 import { NvrAccessory } from "#accessories/nvr-accessory";
 import { SensorAccessory } from "#accessories/sensor-accessory";
@@ -39,7 +40,12 @@ import { probeCodecs, type CodecSupport } from "#media/codecs";
 import { PLATFORM_NAME, PLUGIN_NAME } from "#settings";
 import { describe } from "#util/describe";
 
-type AnyAccessory = CameraAccessory | LightAccessory | SensorAccessory | NvrAccessory;
+type AnyAccessory =
+  | CameraAccessory
+  | ChimeAccessory
+  | LightAccessory
+  | SensorAccessory
+  | NvrAccessory;
 
 /**
  * Dynamic platform: connects to one UniFi Protect console, mirrors its devices
@@ -312,6 +318,22 @@ export class UnifiProtectPlatform implements DynamicPlatformPlugin {
         seen.add(
           this.#register(light, "light", (accessory) => new LightAccessory(this, accessory, light)),
         );
+      }
+    }
+    if (config.exposeChimes) {
+      const ringtones = store.ringtones();
+      for (const chime of store.chimes()) {
+        seen.add(
+          this.#register(
+            chime,
+            "chime",
+            (accessory) => new ChimeAccessory(this, accessory, chime, ringtones),
+          ),
+        );
+        // A tone added or removed on the console changes the switch set, and
+        // the tone library is not a device so no device event announces it.
+        const live = this.#accessoryFor(chime.id);
+        if (live instanceof ChimeAccessory) live.setRingtones(ringtones);
       }
     }
     if (config.exposeNvr && store.nvr) {
