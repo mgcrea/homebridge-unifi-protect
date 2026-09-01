@@ -20,6 +20,7 @@ coverage/
 # Session and pinned-certificate cache written by scripts/diagnose.ts
 .cache/
 
-# Hand-built tarball for trialling on a real Homebridge host.
-dist-poc/
-poc/
+# Ad-hoc bundles and tarballs built by hand for trialling on a real Homebridge
+# host. Never part of a release; the published artifact is dist/ alone.
+dist-*/
+*.tgz
