@@ -56,11 +56,10 @@
     "dev:homebridge": "homebridge -D -U ./.homebridge -P . --strict-plugin-resolution",
     "test": "pnpm run lint && pnpm run check && pnpm run spec && pnpm run format:check",
     "release": "release-it",
-    "prepublishOnly": "pnpm run test && pnpm run build",
-    "pack:poc": "tsx scripts/pack-poc.ts"
+    "prepublishOnly": "pnpm run test && pnpm run build"
   },
   "dependencies": {
-    "@mgcrea/unifi-protect": "^0.1.0",
+    "@mgcrea/unifi-protect": "^0.2.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {

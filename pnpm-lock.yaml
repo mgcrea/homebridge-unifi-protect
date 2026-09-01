@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@mgcrea/unifi-protect':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.2.0
+        version: 0.2.0
       zod:
         specifier: ^4.1.12
         version: 4.5.4
@@ -461,8 +461,8 @@ packages:
   '@matter/types@0.17.9':
     resolution: {integrity: sha512-Tdb08WzfM2Ma962NTtNrHTA3S26eBGCj5/kpnpl9LS5Twpw78Rgk/jogOIM/HDVCbu/M/ZSQPmdBN/q3vWEXAw==}
 
-  '@mgcrea/unifi-protect@0.1.0':
-    resolution: {integrity: sha512-64Al585+dDxaM1vLQQNOlsucz2OpQOit35VdRJW6ecuXoTUY2qlqSeWL0/IOeAFAsxYn7qKTTqqt3w+XZVwKBQ==}
+  '@mgcrea/unifi-protect@0.2.0':
+    resolution: {integrity: sha512-DIVCioPsLqfYBHitFIuD+xXE/asIfX/h2AxSl248yjFZ9NBU/AOqx3zC1Vb6L0QIg9Iz5Zck76H9RRe15dkgsw==}
     engines: {node: ^22 || ^24 || ^26}
 
   '@mswjs/interceptors@0.41.9':
@@ -2615,7 +2615,7 @@ snapshots:
       '@matter/general': 0.17.9
       '@matter/model': 0.17.9
 
-  '@mgcrea/unifi-protect@0.1.0':
+  '@mgcrea/unifi-protect@0.2.0':
     dependencies:
       undici: 8.10.1
       ws: 8.21.3
